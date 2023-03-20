@@ -13,7 +13,7 @@ class Generator {
   hostname: string;
   port: string;
   protocol: string;
-  extensions: string;
+  extensions: string[];
   downloadDir: string;
   /** 下载后的文件路径 */
   downloadDirPath: string;
@@ -27,7 +27,7 @@ class Generator {
   downloadUrls: string[];
   constructor() {
     this.getConfigFile();
-    this.downloadDirPath = path.join(process.cwd(), this.downloadDir);
+    this.downloadDirPath = this.downloadDirPath || path.join(process.cwd(), this.downloadDir);
     this.replacedDirPath = path.join(process.cwd(), this.replacedDir);
     this.downloadUrls = [];
     this.init();
@@ -41,6 +41,7 @@ class Generator {
     this.sourceDir = params.sourceDir;
     this.replacedDir = params.replacedDir;
     this.extensions = params.extensions;
+    this.downloadDirPath = params.downloadDirPath;
   };
 
   getConfigFile = async () => {
@@ -155,8 +156,12 @@ class Generator {
     const SCRIPT_TAG_REGEX = /<(script)\s+((?!type=('|")text\/ng-template\3).)*?>.*?<\/\1>/is;
     const SCRIPT_SRC_REGEX = /.*\ssrc=('|")?([^>'"\s]+)/;
     // 取出静态文件
-    // const HTTP_REGEX = /(http(s?):)\/\/(\S+?)\/(\S+?\.(?:jpe?g|png|gif|js|css|json))/g;
     const HTTP_REGEX = /(http(s?):)\/\/(\S+?)\/(\S+?\.(?:jpe?g|png|gif|js|css|json))/g;
+
+    const HTTP_REGEX1 =
+      this.extensions.length > 0
+        ? new RegExp(`(http(s?):)\/\/(\\S+?)\/(\\S+?\\.(?:${this.extensions.map((i) => i).join("|")}))`, "g")
+        : HTTP_REGEX;
 
     if (!content || content.length === 0) {
       return newContent;
@@ -176,28 +181,31 @@ class Generator {
                  *  例如 https://g.alicdn.com/platform/c/??react15-polyfill/0.0.1/dist/index.js,lodash/4.6.1/lodash.min.js
                  */
                 let sources = collectionStr.split(",");
-                let newScriptTag = "";
-
-                sources.forEach((k) => {
+                let newScriptTag = sources.map((k) => {
                   const scriptSrc = `${requestPrefix}${k}`;
-                  this.downloadUrls.push(scriptSrc);
+
+                  if (HTTP_REGEX1.test(scriptSrc)) {
+                    this.downloadUrls.push(scriptSrc);
+                  }
                   // 拆为多个script标签进行加载
-                  newScriptTag += `\n    <script src="${scriptSrc}"></script>`;
+                  return `\n    <script src="${scriptSrc}"></script>`;
                 });
                 return newScriptTag;
               } else {
-                this.downloadUrls.push(matchedScriptSrc);
+                if (HTTP_REGEX1.test(matchedScriptSrc)) {
+                  this.downloadUrls.push(matchedScriptSrc);
+                }
               }
             }
           }
           return match;
         })
-        .replace(HTTP_REGEX, (match) => {
+        .replace(HTTP_REGEX1, (match) => {
           this.downloadUrls.push(match);
           return this.replaceSource(match);
         });
     } else {
-      newContent = content.replace(HTTP_REGEX, (match) => {
+      newContent = content.replace(HTTP_REGEX1, (match) => {
         this.downloadUrls.push(match);
         return this.replaceSource(match);
       });
