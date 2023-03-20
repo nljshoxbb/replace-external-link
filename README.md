@@ -2,11 +2,23 @@
 
 替换静态文件工具
 
-## 安装
+## 开发
 
-`pnpm install @cms-tool/replace-external-link -g`
+`pnpm install`
+
+`pnpm run start`
+
+## 发布
+
+`pnpm build`
+
+`pnpm pub`
 
 ## 使用
+
+### 安装
+
+`pnpm install @cms-tool/replace-external-link -g`
 
 ### 初始化配置文件
 
