@@ -1,6 +1,8 @@
 # replace-external-link
 
-替换静态文件工具
+静态文件资源替换和下载工具
+
+配置路径
 
 ## 开发
 
@@ -9,7 +11,7 @@ pnpm install
 pnpm run start
 pnpm link
 
-// 进入需要操作的文件夹下执行
+// 进入需要替换资源的文件夹下面执行
 pnpm replace-external-link init
 pnpm replace-external-link replace
 ```

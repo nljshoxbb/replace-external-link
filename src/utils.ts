@@ -53,6 +53,7 @@ export async function downloadFile(fileUrl: string, outputPath: string) {
     })
     .catch((e) => {
       logTask(fileUrl, outputPath, "fail");
+      e.outputPath = outputPath;
       return Promise.reject(e);
     });
 }

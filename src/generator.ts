@@ -5,6 +5,7 @@ import { globSync } from "glob";
 import { downloadFile, readFile, writeFile } from "./utils";
 import * as chalk from "chalk";
 import { CONFIG_FILE_NAME } from "./constant";
+import type { AxiosInstance } from "axios";
 
 const config = require("./config");
 const pLimit = require("p-limit");
@@ -109,7 +110,7 @@ class Generator {
     let success = 0;
     let fail = 0;
     const limit = pLimit(10);
-    const input = [];
+    const input: Promise<AxiosInstance>[] = [];
     const urlSet = new Set<string>(urls);
 
     for (const url of urlSet) {
@@ -127,6 +128,12 @@ class Generator {
         if (i.status === "fulfilled") {
           success += 1;
         } else {
+          /** 失败时删除文件 */
+          // @ts-ignore
+          if (i.reason.outputPath) {
+            // @ts-ignore
+            fs.unlinkSync(i.reason.outputPath);
+          }
           fail += 1;
         }
       });
