@@ -13,9 +13,9 @@ const mapActions = {
     description: "初始化配置文件",
     examples: ["replace-external-link init"],
   },
-  build: {
+  replace: {
     description: "生成替换文件",
-    examples: ["replace-external-link build"],
+    examples: ["replace-external-link replace"],
   },
 };
 
@@ -34,7 +34,7 @@ const main = async () => {
           await writeFile(path.join(process.cwd(), CONFIG_FILE_NAME), result);
           console.log(chalk.green(`已生成配置文件 ${configPath}`));
         }
-        if (action === "build") {
+        if (action === "replace") {
           new generator();
         }
       });

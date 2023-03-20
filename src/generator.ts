@@ -1,5 +1,6 @@
 import * as fs from "fs-extra";
 import * as path from "path";
+import * as os from "os";
 import { globSync } from "glob";
 import { downloadFile, readFile, writeFile } from "./utils";
 import * as chalk from "chalk";
@@ -64,8 +65,18 @@ class Generator {
     for (const filePath of [...files]) {
       const content = await readFile(filePath);
       const replacedContent = this.replaceContent(content, filePath);
-      const REGEX = new RegExp(`\\\\${this.sourceDir}`, "g");
-      const replacedPath = filePath.replace(REGEX, `\\${this.replacedDir}`);
+      let REGEX,
+        REPLACE = "";
+      // 需兼容 win linux 路径问题
+      const platform = os.platform();
+      if (platform === "darwin") {
+        REGEX = new RegExp(`/${this.sourceDir}`, "g");
+        REPLACE = `/${this.replacedDir}`;
+      } else if (platform === "win32") {
+        REGEX = new RegExp(`\\\\${this.sourceDir}`, "g");
+        REPLACE = `\\${this.replacedDir}`;
+      }
+      const replacedPath = filePath.replace(REGEX, REPLACE);
       const extname = path.extname(replacedPath);
       if (!extname) {
         fs.ensureDirSync(replacedPath);
