@@ -27,7 +27,6 @@ const main = async () => {
       .command(action)
       .description(mapActions[action].description)
       .action(async () => {
-        console.log(action, __dirname);
         if (action === "init") {
           const result = await readFile(path.join(__dirname, "config.js"));
           const configPath = path.join(process.cwd(), CONFIG_FILE_NAME);
