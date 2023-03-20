@@ -2,27 +2,43 @@
 
 替换静态文件工具
 
+## 安装依赖
+
+```
+pnpm install
+```
+
 ## 开发
 
-`pnpm install`
+```
+pnpm run start
+```
 
-`pnpm run start`
+## 构建
+
+```
+pnpm build
+```
 
 ## 发布
 
-`pnpm build`
-
-`pnpm pub`
+```
+pnpm pub
+```
 
 ## 使用
 
-### 安装
+### 安装包
 
-`pnpm install @cms-tool/replace-external-link -g`
+```
+pnpm install replace-external-link -g
+```
 
 ### 初始化配置文件
 
-`replace-external-link init`
+```
+replace-external-link init
+```
 
 > 如果不生成配置文件，则使用内置配置文件
 
@@ -50,4 +66,6 @@ module.exports = {
 
 ### 替换
 
-`replace-external-link replace`
+```
+replace-external-link replace
+```
