@@ -10,6 +10,8 @@ import type { AxiosInstance } from "axios";
 const config = require("./config");
 const pLimit = require("p-limit");
 
+type TLinkType = "relative" | "absolute";
+
 class Generator {
   hostname: string;
   port: string;
@@ -26,10 +28,13 @@ class Generator {
   sourceDir: string;
   /** 下载资源地址集合 */
   downloadUrls: string[];
+  /** 替换路径 */
+  linkType: TLinkType;
   constructor() {
     this.getConfigFile();
-    this.downloadDirPath = this.downloadDirPath || path.join(process.cwd(), this.downloadDir);
-    this.replacedDirPath = path.join(process.cwd(), this.replacedDir);
+    this.replacedDirPath = path.resolve(this.replacedDir);
+    this.downloadDirPath =
+      path.join(this.replacedDirPath, this.downloadDir) || path.join(process.cwd(), this.downloadDir);
     this.downloadUrls = [];
     this.init();
   }
@@ -42,12 +47,13 @@ class Generator {
     this.sourceDir = params.sourceDir;
     this.replacedDir = params.replacedDir;
     this.extensions = params.extensions;
-    this.downloadDirPath = params.downloadDirPath;
+    this.linkType = params.linkType;
   };
 
   getConfigFile = async () => {
-    if (fs.existsSync(path.join(process.cwd(), CONFIG_FILE_NAME))) {
-      const data = require(path.join(process.cwd(), CONFIG_FILE_NAME));
+    const configFilePath = path.join(process.cwd(), CONFIG_FILE_NAME);
+    if (fs.existsSync(configFilePath)) {
+      const data = require(configFilePath);
       this.setDefaultConfig(data);
     } else {
       this.setDefaultConfig(config);
@@ -56,14 +62,20 @@ class Generator {
 
   async init() {
     fs.removeSync(this.downloadDirPath);
-    fs.removeSync(this.replacedDirPath);
+    if (this.sourceDir !== this.replacedDir) {
+      fs.removeSync(this.replacedDirPath);
+    }
 
     const files = this.scanDir();
+
     await this.processFiles(files);
     await this.fetchStaticResources(this.downloadUrls);
   }
 
   processFiles = async (files) => {
+    const sourceDir = path.basename(path.resolve(this.sourceDir));
+    const replacedDir = path.basename(path.resolve(this.replacedDir));
+
     for (const filePath of [...files]) {
       const content = await readFile(filePath);
       const replacedContent = this.replaceContent(content, filePath);
@@ -72,14 +84,15 @@ class Generator {
       // 需兼容 win linux 路径问题
       const platform = os.platform();
       if (platform === "darwin") {
-        REGEX = new RegExp(`/${this.sourceDir}`, "g");
-        REPLACE = `/${this.replacedDir}`;
+        REGEX = new RegExp(`/${sourceDir}`, "g");
+        REPLACE = `/${replacedDir}`;
       } else if (platform === "win32") {
-        REGEX = new RegExp(`\\\\${this.sourceDir}`, "g");
-        REPLACE = `\\${this.replacedDir}`;
+        REGEX = new RegExp(`\\\\${sourceDir}`, "g");
+        REPLACE = `\\${replacedDir}`;
       }
       const replacedPath = filePath.replace(REGEX, REPLACE);
       const extname = path.extname(replacedPath);
+
       if (!extname) {
         fs.ensureDirSync(replacedPath);
       } else {
@@ -165,7 +178,7 @@ class Generator {
     // 取出静态文件
     const HTTP_REGEX = /(http(s?):)\/\/(\S+?)\/(\S+?\.(?:jpe?g|png|gif|js|css|json))/g;
 
-    const HTTP_REGEX1 =
+    const HTTP_REGEX_EXT =
       this.extensions.length > 0
         ? new RegExp(`(http(s?):)\/\/(\\S+?)\/(\\S+?\\.(?:${this.extensions.map((i) => i).join("|")}))`, "g")
         : HTTP_REGEX;
@@ -175,6 +188,7 @@ class Generator {
     }
 
     if (path.extname(filePath) === ".html") {
+      // 处理html资源中的外链
       newContent = content
         .replace(ALL_SCRIPT_REGEX, (match, scriptTag) => {
           if (SCRIPT_TAG_REGEX.test(match) && scriptTag.match(SCRIPT_SRC_REGEX)) {
@@ -191,7 +205,7 @@ class Generator {
                 let newScriptTag = sources.map((k) => {
                   const scriptSrc = `${requestPrefix}${k}`;
 
-                  if (HTTP_REGEX1.test(scriptSrc)) {
+                  if (HTTP_REGEX_EXT.test(scriptSrc)) {
                     this.downloadUrls.push(scriptSrc);
                   }
                   // 拆为多个script标签进行加载
@@ -199,7 +213,7 @@ class Generator {
                 });
                 return newScriptTag;
               } else {
-                if (HTTP_REGEX1.test(matchedScriptSrc)) {
+                if (HTTP_REGEX_EXT.test(matchedScriptSrc)) {
                   this.downloadUrls.push(matchedScriptSrc);
                 }
               }
@@ -207,12 +221,12 @@ class Generator {
           }
           return match;
         })
-        .replace(HTTP_REGEX1, (match) => {
+        .replace(HTTP_REGEX_EXT, (match) => {
           this.downloadUrls.push(match);
           return this.replaceSource(match);
         });
     } else {
-      newContent = content.replace(HTTP_REGEX1, (match) => {
+      newContent = content.replace(HTTP_REGEX_EXT, (match) => {
         this.downloadUrls.push(match);
         return this.replaceSource(match);
       });
@@ -223,11 +237,17 @@ class Generator {
   /** 替换源 */
   replaceSource = (oldUrl) => {
     const url = new URL(oldUrl);
-    url.hostname = this.hostname;
-    url.port = this.port;
-    url.pathname = `/${this.downloadDir}${url.pathname}`;
-    url.protocol = this.protocol;
-    return url.href;
+    const downloadDirName = path.basename(path.resolve(this.downloadDir));
+    if (this.linkType === "absolute") {
+      url.hostname = this.hostname;
+      url.port = this.port;
+      url.pathname = `/${downloadDirName}${url.pathname}`;
+      url.protocol = this.protocol;
+      return url.href;
+    } else if (this.linkType === "relative") {
+      const href = `./${downloadDirName}${url.pathname}`;
+      return href;
+    }
   };
 }
 
