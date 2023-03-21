@@ -49,16 +49,16 @@ module.exports = {
   hostname: "127.0.0.1",
   /** 源替换后端口 */
   port: "8087",
-  /** 下载文件夹 */
-  downloadDir: "download",
-  /** 需要替换源的文件夹 */
-  sourceDir: "build",
+  /** 源文件已下载存放位置 */
+  downloadDir: "../download/replace_build",
+  /** 需要替换源链接的文件夹 */
+  sourceDir: "./build",
   /** 源替换后输出的文件夹 */
-  replacedDir: "replacedDir",
+  replacedDir: "./replace_build",
   /** 支持替换源的后缀 */
   extensions: ["js", "css", "json", "jpeg", "jpg", "png", "gif"],
-  /** 下载静态文件夹生成地址，如未配置则生成在根目录 */
-  downloadDirPath: "",
+  /** 替换源连接路径 relative | absolute */
+  linkType: "absolute",
 };
 ```
 
