@@ -116,6 +116,7 @@ class Generator {
     });
     const files = results.map((path) => path.fullpath());
     const periodFiles = periodResults.map((path) => path.fullpath());
+    console.log(files);
     return [...files];
   };
 
@@ -178,10 +179,14 @@ class Generator {
     // 取出静态文件
     const HTTP_REGEX = /(http(s?):)\/\/(\S+?)\/(\S+?\.(?:jpe?g|png|gif|js|css|json))/g;
 
-    const HTTP_REGEX_EXT =
-      this.extensions.length > 0
-        ? new RegExp(`(http(s?):)\/\/(\\S+?)\/(\\S+?\\.(?:${this.extensions.map((i) => i).join("|")}))`, "g")
-        : HTTP_REGEX;
+    // const HTTP_REGEX_EXT =
+    //   this.extensions.length > 0
+    //     ? new RegExp(`(http(s?):)\/\/(\\S+?)\/(\\S+?\\.(?:${this.extensions.map((i) => i).join("|")}))`, "g")
+    //     : HTTP_REGEX;
+    // const HTTP_REGEX_EXT = /^(http|https):\/\/[^\s$.?#].[^\s]*\.(jpe?g|png|gif|js|css|json)$/g;
+    const HTTP_REGEX_EXT = /"(https?:\/\/[^\s"]+?\.(?:css|js|png))"|'(https?:\/\/[^\s']+\.(?:css|js|png))'/gi;
+
+    console.log(HTTP_REGEX_EXT);
 
     if (!content || content.length === 0) {
       return newContent;
@@ -189,42 +194,40 @@ class Generator {
 
     if (path.extname(filePath) === ".html") {
       // 处理html资源中的外链
-      newContent = content
-        .replace(ALL_SCRIPT_REGEX, (match, scriptTag) => {
-          if (SCRIPT_TAG_REGEX.test(match) && scriptTag.match(SCRIPT_SRC_REGEX)) {
-            const matchedScriptSrcMatch = scriptTag.match(SCRIPT_SRC_REGEX);
-            let matchedScriptSrc = matchedScriptSrcMatch && matchedScriptSrcMatch[2];
+      newContent = content.replace(ALL_SCRIPT_REGEX, (match, scriptTag) => {
+        if (SCRIPT_TAG_REGEX.test(match) && scriptTag.match(SCRIPT_SRC_REGEX)) {
+          const matchedScriptSrcMatch = scriptTag.match(SCRIPT_SRC_REGEX);
+          let matchedScriptSrc = matchedScriptSrcMatch && matchedScriptSrcMatch[2];
+          if (matchedScriptSrc.includes("http")) {
+            if (matchedScriptSrc.includes("??")) {
+              const [requestPrefix, collectionStr] = matchedScriptSrc.split("??");
+              /** 阿里静态资源聚合请求拆分
+               *  例如 https://g.alicdn.com/platform/c/??react15-polyfill/0.0.1/dist/index.js,lodash/4.6.1/lodash.min.js
+               */
+              let sources = collectionStr.split(",");
+              let newScriptTag = sources.map((k) => {
+                const scriptSrc = `${requestPrefix}${k}`;
 
-            if (matchedScriptSrc.includes("http")) {
-              if (matchedScriptSrc.includes("??")) {
-                const [requestPrefix, collectionStr] = matchedScriptSrc.split("??");
-                /** 阿里静态资源聚合请求拆分
-                 *  例如 https://g.alicdn.com/platform/c/??react15-polyfill/0.0.1/dist/index.js,lodash/4.6.1/lodash.min.js
-                 */
-                let sources = collectionStr.split(",");
-                let newScriptTag = sources.map((k) => {
-                  const scriptSrc = `${requestPrefix}${k}`;
-
-                  if (HTTP_REGEX_EXT.test(scriptSrc)) {
-                    this.downloadUrls.push(scriptSrc);
-                  }
-                  // 拆为多个script标签进行加载
-                  return `\n    <script src="${scriptSrc}"></script>`;
-                });
-                return newScriptTag;
-              } else {
-                if (HTTP_REGEX_EXT.test(matchedScriptSrc)) {
-                  this.downloadUrls.push(matchedScriptSrc);
+                if (HTTP_REGEX_EXT.test(scriptSrc)) {
+                  this.downloadUrls.push(scriptSrc);
                 }
-              }
+                // 拆为多个script标签进行加载
+                return `\n    <script src="${scriptSrc}"></script>`;
+              });
+              return newScriptTag;
+            } else if (HTTP_REGEX_EXT.test(matchedScriptSrc)) {
+              this.downloadUrls.push(matchedScriptSrc);
             }
           }
-          return match;
-        })
-        .replace(HTTP_REGEX_EXT, (match) => {
-          this.downloadUrls.push(match);
-          return this.replaceSource(match);
-        });
+        }
+        return match;
+      });
+      console.log(newContent);
+
+      newContent = newContent.replace(HTTP_REGEX_EXT, (match) => {
+        this.downloadUrls.push(match);
+        return this.replaceSource(match);
+      });
     } else {
       newContent = content.replace(HTTP_REGEX_EXT, (match) => {
         this.downloadUrls.push(match);
@@ -238,6 +241,7 @@ class Generator {
   replaceSource = (oldUrl) => {
     const url = new URL(oldUrl);
     const downloadDirName = path.basename(path.resolve(this.downloadDir));
+    console.log("replaceSource====", url.href);
     if (this.linkType === "absolute") {
       url.hostname = this.hostname;
       url.port = this.port;
