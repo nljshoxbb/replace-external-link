@@ -34,6 +34,7 @@
     "inquirer": "^8.1.2",
     "node-fetch": "^3.3.1",
     "p-limit": "3.1.0",
+    "puppeteer": "^19.7.5",
     "shelljs": "^0.8.4",
     "yargs": "^17.2.0"
   },

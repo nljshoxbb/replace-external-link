@@ -6,6 +6,7 @@ import { downloadFile, readFile, writeFile } from "./utils";
 import * as chalk from "chalk";
 import { CONFIG_FILE_NAME } from "./constant";
 import type { AxiosInstance } from "axios";
+import * as puppeteer from "puppeteer";
 
 const config = require("./config");
 const pLimit = require("p-limit");
@@ -30,6 +31,7 @@ class Generator {
   downloadUrls: string[];
   /** 替换路径 */
   linkType: TLinkType;
+  indexHtml: string;
   constructor() {
     this.getConfigFile();
     this.replacedDirPath = path.resolve(this.replacedDir);
@@ -48,6 +50,7 @@ class Generator {
     this.replacedDir = params.replacedDir;
     this.extensions = params.extensions;
     this.linkType = params.linkType;
+    this.indexHtml = params.indexHtml;
   };
 
   getConfigFile = async () => {
@@ -66,11 +69,113 @@ class Generator {
       fs.removeSync(this.replacedDirPath);
     }
 
+    await this.startBrowser();
     const files = this.scanDir();
 
     await this.processFiles(files);
     await this.fetchStaticResources(this.downloadUrls);
   }
+
+  waitTillHTMLRendered = async (page, timeout = 30000) => {
+    const checkDurationMsecs = 5000;
+    const maxChecks = timeout / checkDurationMsecs;
+    let lastHTMLSize = 0;
+    let checkCounts = 1;
+    let countStableSizeIterations = 0;
+    const minStableSizeIterations = 3;
+
+    while (checkCounts++ <= maxChecks) {
+      let html = await page.content();
+      let currentHTMLSize = html.length;
+
+      let bodyHTMLSize = await page.evaluate(() => document.body.innerHTML.length);
+
+      console.log("last: ", lastHTMLSize, " <> curr: ", currentHTMLSize, " body html size: ", bodyHTMLSize);
+
+      if (lastHTMLSize != 0 && currentHTMLSize == lastHTMLSize) countStableSizeIterations++;
+      else countStableSizeIterations = 0; //reset the counter
+
+      if (countStableSizeIterations >= minStableSizeIterations) {
+        console.log("Page rendered fully..");
+        break;
+      }
+
+      lastHTMLSize = currentHTMLSize;
+      await page.waitForTimeout(checkDurationMsecs);
+    }
+  };
+
+  startBrowser = async () => {
+    const browser = await puppeteer.launch({
+      headless: false,
+      defaultViewport: { width: 1600, height: 800 },
+      devtools: true,
+    });
+    const page = await browser.newPage();
+    // await page.goto("file://C:/Users/compoundeye/test.html");
+    // D:\lowcode-demo-main\demo-general\build\index.html
+    // console.log(path.resolve(this.indexHtml));
+
+    var contentHtml = fs.readFileSync(path.resolve(this.indexHtml), "utf8");
+    // await page.goto(`file://${path.normalize(path.resolve(this.indexHtml))}`);
+    // page.on("response", (response) => {
+    //   response.text().then(function (textBody) {
+    //     //this returns promise that ajax request body was received
+    //     console.log(response.url());
+    //     // console.log(textBody);
+    //   });
+    // });
+    // await page.setRequestInterception(true);
+    // page.on("request", (interceptedRequest) => {
+    //   console.log(interceptedRequest.url());
+    //   // if (interceptedRequest.isInterceptResolutionHandled()) return;
+    //   // if (interceptedRequest.url().endsWith(".png") || interceptedRequest.url().endsWith(".jpg"))
+    //   //   interceptedRequest.abort();
+    //   interceptedRequest.continue();
+    // });
+    await page.setRequestInterception(true); //开启请求拦截
+    var totalRequests = 0;
+    page.on("request", (request) => {
+      const type = request.resourceType();
+      totalRequests += 1;
+      request.continue();
+    });
+    await page.setContent(contentHtml, {
+      // waitUntil: "networkidle0",
+      // timeout: 5000,
+      // waitUntil: "networkidle2",
+    });
+    await page.evaluateOnNewDocument((token) => {
+      localStorage.clear();
+      localStorage.setItem("token", token);
+    }, "eyJh...9_8cw");
+    await page.setContent(contentHtml, {
+      // waitUntil: "networkidle0",
+      // timeout: 5000,
+      // waitUntil: "networkidle2",
+    });
+    console.log(totalRequests);
+    // await page.setRequestInterception(true);
+    // let monitorRequests = new PuppeteerNetworkMonitor(page);
+
+    // await this.waitTillHTMLRendered(page);
+    // // await page.goto("http://www.baidu.com/");
+    // await page.screenshot({ path: "index.png" });
+    // await page.pdf({ path: "index.pdf" });
+    // await browser.close();
+
+    // await page.pdf({
+    //   path: "test.pdf",
+    //   format: "A4",
+    //   margin: {
+    //     top: "20px",
+    //     left: "20px",
+    //     right: "20px",
+    //     bottom: "20px",
+    //   },
+    // });
+    // await browser.close();
+  };
 
   processFiles = async (files) => {
     const sourceDir = path.basename(path.resolve(this.sourceDir));
@@ -116,18 +221,18 @@ class Generator {
     });
     const files = results.map((path) => path.fullpath());
     const periodFiles = periodResults.map((path) => path.fullpath());
-    console.log(files);
     return [...files];
   };
 
-  fetchStaticResources = async (urls) => {
+  fetchStaticResources = async (urls: string[]) => {
     let success = 0;
     let fail = 0;
     const limit = pLimit(10);
     const input: Promise<AxiosInstance>[] = [];
     const urlSet = new Set<string>(urls);
 
-    for (const url of urlSet) {
+    for (const oldUrl of urlSet) {
+      const url = this.removeQuotes(oldUrl);
       const parsed = new URL(url);
       const index = parsed.pathname.lastIndexOf("/");
       const pathstr = index === 0 ? "" : parsed.pathname.substring(0, index + 1);
@@ -171,7 +276,7 @@ class Generator {
     return Promise.resolve();
   };
 
-  replaceContent = (content, filePath) => {
+  replaceContent = (content: string, filePath: string) => {
     let newContent = "";
     const ALL_SCRIPT_REGEX = /(<script[\s\S]*?>)[\s\S]*?<\/script>/gi;
     const SCRIPT_TAG_REGEX = /<(script)\s+((?!type=('|")text\/ng-template\3).)*?>.*?<\/\1>/is;
@@ -185,8 +290,6 @@ class Generator {
     //     : HTTP_REGEX;
     // const HTTP_REGEX_EXT = /^(http|https):\/\/[^\s$.?#].[^\s]*\.(jpe?g|png|gif|js|css|json)$/g;
     const HTTP_REGEX_EXT = /"(https?:\/\/[^\s"]+?\.(?:css|js|png))"|'(https?:\/\/[^\s']+\.(?:css|js|png))'/gi;
-
-    console.log(HTTP_REGEX_EXT);
 
     if (!content || content.length === 0) {
       return newContent;
@@ -222,7 +325,7 @@ class Generator {
         }
         return match;
       });
-      console.log(newContent);
+      // console.log(newContent);
 
       newContent = newContent.replace(HTTP_REGEX_EXT, (match) => {
         this.downloadUrls.push(match);
@@ -231,22 +334,29 @@ class Generator {
     } else {
       newContent = content.replace(HTTP_REGEX_EXT, (match) => {
         this.downloadUrls.push(match);
-        return this.replaceSource(match);
+        return this.replaceSource(match, true);
       });
     }
     return newContent;
   };
 
+  // 清除单双引号
+  removeQuotes = (url) => {
+    return url.replace(/['"]/g, "");
+  };
+
   /** 替换源 */
-  replaceSource = (oldUrl) => {
-    const url = new URL(oldUrl);
+  replaceSource = (oldUrl: string, isJSFile: boolean = false) => {
+    const url = new URL(this.removeQuotes(oldUrl));
     const downloadDirName = path.basename(path.resolve(this.downloadDir));
-    console.log("replaceSource====", url.href);
     if (this.linkType === "absolute") {
       url.hostname = this.hostname;
       url.port = this.port;
       url.pathname = `/${downloadDirName}${url.pathname}`;
       url.protocol = this.protocol;
+      if (isJSFile) {
+        return `"${url.href}"`;
+      }
       return url.href;
     } else if (this.linkType === "relative") {
       const href = `./${downloadDirName}${url.pathname}`;

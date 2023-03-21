@@ -2,7 +2,7 @@ import * as chalk from "chalk";
 import axios from "axios";
 import * as fs from "fs-extra";
 
-export const readFile = (file) => {
+export const readFile = (file): Promise<string> => {
   return new Promise((resolve, reject) => {
     fs.readFile(file, "utf-8", (err, data) => {
       resolve(data);

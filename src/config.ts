@@ -15,4 +15,5 @@ module.exports = {
   extensions: ["js", "css", "json", "jpeg", "jpg", "png", "gif"],
   /** 替换源连接路径 relative | absolute */
   linkType: "absolute",
+  indexHtml: "",
 };
