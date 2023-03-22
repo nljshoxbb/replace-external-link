@@ -26,7 +26,6 @@ class Generator {
   hostname: string;
   port: string;
   protocol: string;
-  extensions: string[];
   downloadDir: string;
   /** 下载后的文件路径 */
   downloadDirPath: string;
@@ -42,7 +41,6 @@ class Generator {
   dynamicallyLoadUrls: string[];
   /** 替换路径 */
   linkType: TLinkType;
-  indexHtml: string;
   downloadResult: TDownloadResult;
   downloadLog: boolean;
   constructor(downloadLog) {
@@ -67,9 +65,7 @@ class Generator {
     this.downloadDir = params.downloadDir;
     this.sourceDir = params.sourceDir;
     this.replacedDir = params.replacedDir;
-    this.extensions = params.extensions;
     this.linkType = params.linkType;
-    this.indexHtml = params.indexHtml;
   };
 
   getConfigFile = async () => {
@@ -99,10 +95,12 @@ class Generator {
   checkHttpMissingLinks = async () => {
     console.log(chalk.blue("检查链接是否下载完毕..."));
     const port = 5730;
+    const serverHostname = "127.0.0.1";
     /** 启动http服务提供给puppeteer打开； pupperter 通过 file:// 打开时无法访问localstorge导致工程没启动 */
     const childP = child_process.spawn("http-server", [this.sourceDir, `-p ${port}`], {
       stdio: "inherit",
       cwd: process.cwd(),
+      shell: true,
     });
     const browser = await puppeteer.launch({
       headless: false,
@@ -114,7 +112,7 @@ class Generator {
       const url = interceptedRequest.url();
       if (!this.downloadUrls.includes(url)) {
         const urlIns = new URL(url);
-        if (urlIns.hostname !== "127.0.0.1") {
+        if (urlIns.hostname !== serverHostname) {
           this.dynamicallyLoadUrls.push(url);
         }
       }
@@ -123,13 +121,21 @@ class Generator {
         interceptedRequest.abort();
       else interceptedRequest.continue();
     });
-    await page.goto(`http://127.0.0.1:${port}`);
+    await page.goto(`http://${serverHostname}:${port}`);
     await browser.close();
 
-    childP.on("close", () => {
-      childP.kill();
-    });
-    childP.kill();
+    /** windows kill childprocess */
+    // @ts-ignore
+    try {
+      if (os.platform() === "win32") {
+        child_process.exec("taskkill /pid " + childP.pid + " /T /F");
+      } else {
+        childP.kill();
+      }
+    } catch (error) {
+      console.log(error);
+    }
+
     if (this.dynamicallyLoadUrls.length > 0) {
       await this.fetchStaticResources(this.dynamicallyLoadUrls);
     }
@@ -173,21 +179,14 @@ class Generator {
       withFileTypes: true,
       ignore: ["node_modules/**", ".lock"],
     });
-    const periodResults = globSync("**/.**/**", {
-      stat: true,
-      withFileTypes: true,
-      ignore: ["node_modules/**", ".lock"],
-    });
+
     const files = results.map((path) => path.fullpath());
-    const periodFiles = periodResults.map((path) => path.fullpath());
-    return [...files];
+    return files;
   };
 
   fetchStaticResources = async (urls: string[]) => {
     console.log(chalk.blue("开始下载文件..."));
     try {
-      let success = 0;
-      let fail = 0;
       const limit = pLimit(6);
       const input: Promise<AxiosInstance>[] = [];
       bar1.start(urls.length, 0);
@@ -202,7 +201,7 @@ class Generator {
           limit(() => {
             return new Promise(async (resolve, reject) => {
               try {
-                const res = await downloadFile(url, destPath, this.downloadLog);
+                await downloadFile(url, destPath, this.downloadLog);
                 resolve(true);
                 bar1.increment();
               } catch (error) {
@@ -212,7 +211,6 @@ class Generator {
             });
           })
         );
-        // input.push(limit(() => downloadFile(url, destPath)));
       }
       const result = await Promise.allSettled(input);
 
@@ -231,7 +229,6 @@ class Generator {
             });
           }
           this.downloadResult.fail += 1;
-          fail += 1;
         }
       });
       bar1.stop();
@@ -296,19 +293,19 @@ class Generator {
 
       newContent = newContent.replace(HTTP_REGEX_EXT, (match) => {
         this.addDownloadUrls(match);
-        return this.replaceSource(this.removeQuotes(match), true);
+        return this.replaceOrigin(this.removeQuotes(match), true);
       });
     } else if (fileType === ".css") {
       newContent = content.replace(HTTP_REGEX_CSS_URL, (match) => {
         const str = match.match(/\(([^)]+)\)/);
         const url = str[1].includes("http") ? str[1] : `http:${str[1]}`;
         this.addDownloadUrls(url);
-        return `(${this.replaceSource(url)})`;
+        return `(${this.replaceOrigin(url)})`;
       });
     } else {
       newContent = content.replace(HTTP_REGEX_EXT, (match) => {
         this.addDownloadUrls(match);
-        return this.replaceSource(this.removeQuotes(match), true);
+        return this.replaceOrigin(this.removeQuotes(match), true);
       });
     }
     return newContent;
@@ -326,13 +323,12 @@ class Generator {
     this.downloadUrls = this.downloadUrls.slice(idx, 1);
   };
 
-  // 清除单双引号
   removeQuotes = (url) => {
     return url.replace(/['"]/g, "");
   };
 
   /** 替换源 */
-  replaceSource = (oldUrl: string, isJSFile: boolean = false) => {
+  replaceOrigin = (oldUrl: string, dynamic: boolean = false) => {
     const url = new URL(oldUrl);
     const downloadDirName = path.basename(path.resolve(this.downloadDir));
     if (this.linkType === "absolute") {
@@ -340,7 +336,7 @@ class Generator {
       url.port = this.port;
       url.pathname = `/${downloadDirName}${url.pathname}`;
       url.protocol = this.protocol;
-      if (isJSFile) {
+      if (dynamic) {
         return `"${url.href}"`;
       }
       return url.href;
@@ -353,18 +349,14 @@ class Generator {
   displayStatistics = () => {
     const { success, fail } = this.downloadResult;
     const structDatas = [
-      { request: "total", sum: this.downloadResult.fail + this.downloadResult.success },
-      { request: "success", sum: success },
-      { request: "fail", sum: fail },
+      { request: "all", total: this.downloadResult.fail + this.downloadResult.success },
+      { request: "success", total: success },
+      { request: "fail", total: fail },
     ];
-    const msgs = [
-      "链接替换完毕!",
-      `replacedDirPath: ${this.replacedDirPath}`,
-      `downloadDirPath: ${this.downloadDirPath}`,
-    ];
-    msgs.forEach((i) => {
-      console.log(`\n${chalk.blue(i)}`);
-    });
+    console.log(`${chalk.blue("链接替换完成!")}`);
+    console.log(`${chalk.yellow("replacedDirPath")}: ${chalk.blue(this.replacedDirPath)}`);
+    console.log(`${chalk.yellow("downloadDirPath")}: ${chalk.blue(this.downloadDirPath)}`);
+    console.log(`${chalk.yellow("replaceOrigin")}: ${chalk.blue(`${this.protocol}://${this.hostname}:${this.port}`)}`);
     console.table(structDatas);
   };
 }
