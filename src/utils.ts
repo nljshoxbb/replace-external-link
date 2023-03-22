@@ -23,21 +23,22 @@ export const logTask = (fileUrl, outputPath, status: "success" | "fail") => {
   console.log(status === "success" ? chalk.green(msg) : chalk.red(msg));
 };
 
-export async function downloadFile(fileUrl: string, outputPath: string) {
+export async function downloadFile(fileUrl: string, outputPath: string, downloadLog) {
   const writer = fs.createWriteStream(outputPath);
 
   return axios({
     method: "get",
     url: fileUrl,
     responseType: "stream",
-    timeout: 5000,
+    timeout: 3000,
   })
     .then((response) => {
       return new Promise((resolve, reject) => {
         response.data.pipe(writer);
         let error = null;
         writer.on("finish", () => {
-          logTask(fileUrl, outputPath, "success");
+          downloadLog && logTask(fileUrl, outputPath, "success");
+          resolve(true);
         });
         writer.on("error", (err) => {
           error = err;
@@ -52,8 +53,8 @@ export async function downloadFile(fileUrl: string, outputPath: string) {
       });
     })
     .catch((e) => {
-      logTask(fileUrl, outputPath, "fail");
+      downloadLog && logTask(fileUrl, outputPath, "fail");
       e.outputPath = outputPath;
-      return Promise.reject(e);
+      throw e;
     });
 }

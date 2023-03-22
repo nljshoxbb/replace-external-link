@@ -24,17 +24,20 @@ const main = async () => {
 
   Reflect.ownKeys(mapActions).forEach((action: any) => {
     program
+      .option("--log", "显示下载log")
       .command(action)
       .description(mapActions[action].description)
       .action(async () => {
         if (action === "init") {
+          console.log(program.getOptionValue("log"));
           const result = await readFile(path.join(__dirname, "config.js"));
           const configPath = path.join(process.cwd(), CONFIG_FILE_NAME);
           await writeFile(path.join(process.cwd(), CONFIG_FILE_NAME), result);
           console.log(chalk.green(`已生成配置文件 ${configPath}`));
         }
         if (action === "replace") {
-          new generator();
+          const { log } = program.opts();
+          new generator(log);
         }
       });
   });

@@ -7,11 +7,20 @@ import * as chalk from "chalk";
 import { CONFIG_FILE_NAME } from "./constant";
 import type { AxiosInstance } from "axios";
 import * as puppeteer from "puppeteer";
+import * as child_process from "child_process";
+import * as cliProgress from "cli-progress";
 
 const config = require("./config");
 const pLimit = require("p-limit");
 
+const bar1 = new cliProgress.SingleBar({}, cliProgress.Presets.legacy);
+
 type TLinkType = "relative" | "absolute";
+
+type TDownloadResult = {
+  success: number;
+  fail: number;
+};
 
 class Generator {
   hostname: string;
@@ -29,15 +38,25 @@ class Generator {
   sourceDir: string;
   /** 下载资源地址集合 */
   downloadUrls: string[];
+  /** 动态加载的url，无法通过扫描的代码中匹配到http请求地址 */
+  dynamicallyLoadUrls: string[];
   /** 替换路径 */
   linkType: TLinkType;
   indexHtml: string;
-  constructor() {
+  downloadResult: TDownloadResult;
+  downloadLog: boolean;
+  constructor(downloadLog) {
+    this.downloadLog = downloadLog;
     this.getConfigFile();
     this.replacedDirPath = path.resolve(this.replacedDir);
     this.downloadDirPath =
       path.join(this.replacedDirPath, this.downloadDir) || path.join(process.cwd(), this.downloadDir);
     this.downloadUrls = [];
+    this.dynamicallyLoadUrls = [];
+    this.downloadResult = {
+      success: 0,
+      fail: 0,
+    };
     this.init();
   }
 
@@ -68,113 +87,52 @@ class Generator {
     if (this.sourceDir !== this.replacedDir) {
       fs.removeSync(this.replacedDirPath);
     }
-
-    await this.startBrowser();
     const files = this.scanDir();
-
+    console.log(chalk.blue("开始处理文件..."));
     await this.processFiles(files);
     await this.fetchStaticResources(this.downloadUrls);
+    await this.checkHttpMissingLinks();
+    this.displayStatistics();
   }
 
-  waitTillHTMLRendered = async (page, timeout = 30000) => {
-    const checkDurationMsecs = 5000;
-    const maxChecks = timeout / checkDurationMsecs;
-    let lastHTMLSize = 0;
-    let checkCounts = 1;
-    let countStableSizeIterations = 0;
-    const minStableSizeIterations = 3;
-
-    while (checkCounts++ <= maxChecks) {
-      let html = await page.content();
-      let currentHTMLSize = html.length;
-
-      let bodyHTMLSize = await page.evaluate(() => document.body.innerHTML.length);
-
-      console.log("last: ", lastHTMLSize, " <> curr: ", currentHTMLSize, " body html size: ", bodyHTMLSize);
-
-      if (lastHTMLSize != 0 && currentHTMLSize == lastHTMLSize) countStableSizeIterations++;
-      else countStableSizeIterations = 0; //reset the counter
-
-      if (countStableSizeIterations >= minStableSizeIterations) {
-        console.log("Page rendered fully..");
-        break;
-      }
-
-      lastHTMLSize = currentHTMLSize;
-      await page.waitForTimeout(checkDurationMsecs);
-    }
-  };
-
-  startBrowser = async () => {
+  /** 检查http替换遗漏链接,主要为js中动态加载js链接 */
+  checkHttpMissingLinks = async () => {
+    console.log(chalk.blue("检查链接是否下载完毕..."));
+    const port = 5730;
+    /** 启动http服务提供给puppeteer打开； pupperter 通过 file:// 打开时无法访问localstorge导致工程没启动 */
+    const childP = child_process.spawn("http-server", [this.sourceDir, `-p ${port}`], {
+      stdio: "inherit",
+      cwd: process.cwd(),
+    });
     const browser = await puppeteer.launch({
       headless: false,
-      defaultViewport: { width: 1600, height: 800 },
       devtools: true,
     });
     const page = await browser.newPage();
-    // await page.goto("file://C:/Users/compoundeye/test.html");
-    // D:\lowcode-demo-main\demo-general\build\index.html
-    // console.log(path.resolve(this.indexHtml));
-
-    var contentHtml = fs.readFileSync(path.resolve(this.indexHtml), "utf8");
-    // await page.goto(`file://${path.normalize(path.resolve(this.indexHtml))}`);
-    // page.on("response", (response) => {
-    //   response.text().then(function (textBody) {
-    //     //this returns promise that ajax request body was received
-    //     console.log(response.url());
-    //     // console.log(textBody);
-    //   });
-    // });
-    // await page.setRequestInterception(true);
-    // page.on("request", (interceptedRequest) => {
-    //   console.log(interceptedRequest.url());
-    //   // if (interceptedRequest.isInterceptResolutionHandled()) return;
-    //   // if (interceptedRequest.url().endsWith(".png") || interceptedRequest.url().endsWith(".jpg"))
-    //   //   interceptedRequest.abort();
-    //   interceptedRequest.continue();
-    // });
     await page.setRequestInterception(true); //开启请求拦截
-    var totalRequests = 0;
-    page.on("request", (request) => {
-      const type = request.resourceType();
-      totalRequests += 1;
-      request.continue();
+    page.on("request", (interceptedRequest) => {
+      const url = interceptedRequest.url();
+      if (!this.downloadUrls.includes(url)) {
+        const urlIns = new URL(url);
+        if (urlIns.hostname !== "127.0.0.1") {
+          this.dynamicallyLoadUrls.push(url);
+        }
+      }
+      if (interceptedRequest.isInterceptResolutionHandled()) return;
+      if (interceptedRequest.url().endsWith(".png") || interceptedRequest.url().endsWith(".jpg"))
+        interceptedRequest.abort();
+      else interceptedRequest.continue();
     });
-    await page.setContent(contentHtml, {
-      // waitUntil: "networkidle0",
-      // timeout: 5000,
-      // waitUntil: "networkidle2",
-    });
-    await page.evaluateOnNewDocument((token) => {
-      localStorage.clear();
-      localStorage.setItem("token", token);
-    }, "eyJh...9_8cw");
-    await page.setContent(contentHtml, {
-      // waitUntil: "networkidle0",
-      // timeout: 5000,
-      // waitUntil: "networkidle2",
-    });
-    console.log(totalRequests);
-    // await page.setRequestInterception(true);
-    // let monitorRequests = new PuppeteerNetworkMonitor(page);
+    await page.goto(`http://127.0.0.1:${port}`);
+    await browser.close();
 
-    // await this.waitTillHTMLRendered(page);
-    // // await page.goto("http://www.baidu.com/");
-    // await page.screenshot({ path: "index.png" });
-    // await page.pdf({ path: "index.pdf" });
-    // await browser.close();
-
-    // await page.pdf({
-    //   path: "test.pdf",
-    //   format: "A4",
-    //   margin: {
-    //     top: "20px",
-    //     left: "20px",
-    //     right: "20px",
-    //     bottom: "20px",
-    //   },
-    // });
-    // await browser.close();
+    childP.on("close", () => {
+      childP.kill();
+    });
+    childP.kill();
+    if (this.dynamicallyLoadUrls.length > 0) {
+      await this.fetchStaticResources(this.dynamicallyLoadUrls);
+    }
   };
 
   processFiles = async (files) => {
@@ -208,6 +166,7 @@ class Generator {
   };
 
   scanDir = (): string[] => {
+    console.log(chalk.blue("开始扫描文件..."));
     /** 扫描当前文件 */
     const results = globSync(`${this.sourceDir}/**`, {
       stat: true,
@@ -225,55 +184,62 @@ class Generator {
   };
 
   fetchStaticResources = async (urls: string[]) => {
-    let success = 0;
-    let fail = 0;
-    const limit = pLimit(10);
-    const input: Promise<AxiosInstance>[] = [];
-    const urlSet = new Set<string>(urls);
-
-    for (const oldUrl of urlSet) {
-      const url = this.removeQuotes(oldUrl);
-      const parsed = new URL(url);
-      const index = parsed.pathname.lastIndexOf("/");
-      const pathstr = index === 0 ? "" : parsed.pathname.substring(0, index + 1);
-      const downloadPath = path.join(this.downloadDirPath, pathstr);
-      fs.ensureDirSync(downloadPath);
-      const destPath = path.join(downloadPath, path.basename(parsed.pathname));
-      input.push(limit(() => downloadFile(url, destPath)));
-    }
+    console.log(chalk.blue("开始下载文件..."));
     try {
+      let success = 0;
+      let fail = 0;
+      const limit = pLimit(6);
+      const input: Promise<AxiosInstance>[] = [];
+      bar1.start(urls.length, 0);
+      for (const url of urls) {
+        const parsed = new URL(url);
+        const index = parsed.pathname.lastIndexOf("/");
+        const pathstr = index === 0 ? "" : parsed.pathname.substring(0, index + 1);
+        const downloadPath = path.join(this.downloadDirPath, pathstr);
+        fs.ensureDirSync(downloadPath);
+        const destPath = path.join(downloadPath, path.basename(parsed.pathname));
+        input.push(
+          limit(() => {
+            return new Promise(async (resolve, reject) => {
+              try {
+                const res = await downloadFile(url, destPath, this.downloadLog);
+                resolve(true);
+                bar1.increment();
+              } catch (error) {
+                reject(error);
+                bar1.increment();
+              }
+            });
+          })
+        );
+        // input.push(limit(() => downloadFile(url, destPath)));
+      }
       const result = await Promise.allSettled(input);
+
       result.forEach((i) => {
         if (i.status === "fulfilled") {
-          success += 1;
+          this.downloadResult.success += 1;
         } else {
           /** 失败时删除文件 */
           // @ts-ignore
           if (i.reason.outputPath) {
             // @ts-ignore
-            fs.unlinkSync(i.reason.outputPath);
+            fs.unlink(i.reason.outputPath, (err) => {
+              if (err) {
+                console.log(err);
+              }
+            });
           }
+          this.downloadResult.fail += 1;
           fail += 1;
         }
       });
+      bar1.stop();
+      return Promise.resolve();
     } catch (error) {
-      console.log(error, "error");
+      console.log(error);
+      return Promise.reject();
     }
-    const structDatas = [
-      { request: "total", sum: urlSet.size },
-      { request: "success", sum: success },
-      { request: "fail", sum: fail },
-    ];
-    const msgs = [
-      "链接替换完毕!",
-      `replacedDirPath: ${this.replacedDirPath}`,
-      `downloadDirPath: ${this.downloadDirPath}`,
-    ];
-    msgs.forEach((i) => {
-      console.log(`\n${chalk.blue(i)}`);
-    });
-    console.table(structDatas);
-    return Promise.resolve();
   };
 
   replaceContent = (content: string, filePath: string) => {
@@ -281,21 +247,23 @@ class Generator {
     const ALL_SCRIPT_REGEX = /(<script[\s\S]*?>)[\s\S]*?<\/script>/gi;
     const SCRIPT_TAG_REGEX = /<(script)\s+((?!type=('|")text\/ng-template\3).)*?>.*?<\/\1>/is;
     const SCRIPT_SRC_REGEX = /.*\ssrc=('|")?([^>'"\s]+)/;
-    // 取出静态文件
-    const HTTP_REGEX = /(http(s?):)\/\/(\S+?)\/(\S+?\.(?:jpe?g|png|gif|js|css|json))/g;
-
-    // const HTTP_REGEX_EXT =
-    //   this.extensions.length > 0
-    //     ? new RegExp(`(http(s?):)\/\/(\\S+?)\/(\\S+?\\.(?:${this.extensions.map((i) => i).join("|")}))`, "g")
-    //     : HTTP_REGEX;
-    // const HTTP_REGEX_EXT = /^(http|https):\/\/[^\s$.?#].[^\s]*\.(jpe?g|png|gif|js|css|json)$/g;
-    const HTTP_REGEX_EXT = /"(https?:\/\/[^\s"]+?\.(?:css|js|png))"|'(https?:\/\/[^\s']+\.(?:css|js|png))'/gi;
+    /**
+     *  'url:"http://123.com"'
+     */
+    const HTTP_REGEX_EXT = /"(https?:\/\/[^\s"]+?\.(?:css|js|png|json))"|'(https?:\/\/[^\s']+\.(?:css|js|png|json))'/gi;
+    /**
+     * url(// ... .woff2?t=1638951976966)
+     * url(http:// ....)
+     */
+    const HTTP_REGEX_CSS_URL = /(\(\/\/[^\s"]+?\.?\))|(\(https?:\/\/[^\s"]+?\.?\))/gi;
 
     if (!content || content.length === 0) {
       return newContent;
     }
 
-    if (path.extname(filePath) === ".html") {
+    const fileType = path.extname(filePath);
+    // console.log(chalk.blue("匹配替换链接路径..."));
+    if (fileType === ".html" || fileType === ".ejs") {
       // 处理html资源中的外链
       newContent = content.replace(ALL_SCRIPT_REGEX, (match, scriptTag) => {
         if (SCRIPT_TAG_REGEX.test(match) && scriptTag.match(SCRIPT_SRC_REGEX)) {
@@ -312,32 +280,50 @@ class Generator {
                 const scriptSrc = `${requestPrefix}${k}`;
 
                 if (HTTP_REGEX_EXT.test(scriptSrc)) {
-                  this.downloadUrls.push(scriptSrc);
+                  this.addDownloadUrls(scriptSrc);
                 }
                 // 拆为多个script标签进行加载
                 return `\n    <script src="${scriptSrc}"></script>`;
               });
               return newScriptTag;
             } else if (HTTP_REGEX_EXT.test(matchedScriptSrc)) {
-              this.downloadUrls.push(matchedScriptSrc);
+              this.addDownloadUrls(matchedScriptSrc);
             }
           }
         }
         return match;
       });
-      // console.log(newContent);
 
       newContent = newContent.replace(HTTP_REGEX_EXT, (match) => {
-        this.downloadUrls.push(match);
-        return this.replaceSource(match);
+        this.addDownloadUrls(match);
+        return this.replaceSource(this.removeQuotes(match), true);
+      });
+    } else if (fileType === ".css") {
+      newContent = content.replace(HTTP_REGEX_CSS_URL, (match) => {
+        const str = match.match(/\(([^)]+)\)/);
+        const url = str[1].includes("http") ? str[1] : `http:${str[1]}`;
+        this.addDownloadUrls(url);
+        return `(${this.replaceSource(url)})`;
       });
     } else {
       newContent = content.replace(HTTP_REGEX_EXT, (match) => {
-        this.downloadUrls.push(match);
-        return this.replaceSource(match, true);
+        this.addDownloadUrls(match);
+        return this.replaceSource(this.removeQuotes(match), true);
       });
     }
     return newContent;
+  };
+
+  addDownloadUrls = (url: string) => {
+    const item = this.removeQuotes(url);
+    if (!this.downloadUrls.includes(item)) {
+      this.downloadUrls.push(item);
+    }
+  };
+
+  removeDownloadUrls = (url: string) => {
+    const idx = this.downloadUrls.indexOf(url);
+    this.downloadUrls = this.downloadUrls.slice(idx, 1);
   };
 
   // 清除单双引号
@@ -347,7 +333,7 @@ class Generator {
 
   /** 替换源 */
   replaceSource = (oldUrl: string, isJSFile: boolean = false) => {
-    const url = new URL(this.removeQuotes(oldUrl));
+    const url = new URL(oldUrl);
     const downloadDirName = path.basename(path.resolve(this.downloadDir));
     if (this.linkType === "absolute") {
       url.hostname = this.hostname;
@@ -362,6 +348,24 @@ class Generator {
       const href = `./${downloadDirName}${url.pathname}`;
       return href;
     }
+  };
+
+  displayStatistics = () => {
+    const { success, fail } = this.downloadResult;
+    const structDatas = [
+      { request: "total", sum: this.downloadResult.fail + this.downloadResult.success },
+      { request: "success", sum: success },
+      { request: "fail", sum: fail },
+    ];
+    const msgs = [
+      "链接替换完毕!",
+      `replacedDirPath: ${this.replacedDirPath}`,
+      `downloadDirPath: ${this.downloadDirPath}`,
+    ];
+    msgs.forEach((i) => {
+      console.log(`\n${chalk.blue(i)}`);
+    });
+    console.table(structDatas);
   };
 }
 
