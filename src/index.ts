@@ -24,7 +24,7 @@ const main = async () => {
 
   Reflect.ownKeys(mapActions).forEach((action: any) => {
     program
-      .option("--log", "显示下载log")
+      .option("--log", "打印详细信息")
       .command(action)
       .description(mapActions[action].description)
       .action(async () => {

@@ -11,9 +11,6 @@ pnpm install
 pnpm run start
 pnpm link
 
-// 进入需要替换资源的文件夹下面执行
-pnpm replace-origin-link init
-pnpm replace-origin-link replace
 ```
 
 ## 发布
@@ -62,4 +59,10 @@ module.exports = {
 
 ```
 replace-origin-link replace
+```
+
+### 打印详细信息
+
+```
+replace-origin-link replace --log
 ```
