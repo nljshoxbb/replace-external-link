@@ -26,13 +26,8 @@ export const logTask = (fileUrl, outputPath, status: "success" | "fail") => {
 
 const urls = [];
 export async function downloadFile(fileUrl: string, outputPath: string, printLog: boolean) {
-  // urls.push(outputPath);
   return new Promise(async (resolve, reject) => {
     try {
-      // if (outputPath.includes("standalone-worker.min.js")) {
-      //   resolve(true);
-      //   return;
-      // }
       const fileStream = fs.createWriteStream(outputPath, { highWaterMark: 32000 });
       const repsonse = await axios({ method: "get", url: fileUrl, responseType: "stream", timeout: 3000 });
       repsonse.data.pipe(fileStream);
@@ -57,14 +52,12 @@ export async function downloadFile(fileUrl: string, outputPath: string, printLog
 
 export function getFolderSizeByGlob(folder, { ignorePattern: array }) {
   const filePaths = glob.sync("**", {
-    // "**" means you search on the whole folder
-    cwd: folder, // folder path
-    ignore: array, // array of glob pattern strings
-    absolute: true, // you have to set glob to return absolute path not only file names
+    cwd: folder,
+    ignore: array,
+    absolute: true,
   });
   let totalSize = 0;
   filePaths.forEach((file) => {
-    // console.log("file", file);
     const stat = fs.statSync(file);
     totalSize += stat.size;
   });

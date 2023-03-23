@@ -12,7 +12,7 @@ import startServer from "./server";
 const config = require("./config");
 const pLimit = require("p-limit");
 
-const bar1 = new cliProgress.SingleBar({}, cliProgress.Presets.legacy);
+const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.legacy);
 
 type TLinkType = "relative" | "absolute";
 
@@ -186,68 +186,6 @@ class Generator {
     return Promise.resolve();
   };
 
-  fetchStaticResources = async (urls: string[]) => {
-    console.log(chalk.cyan(`开始下载文件到${this.downloadDirPath}`));
-
-    try {
-      const limit = pLimit(10);
-      const input: Promise<any>[] = [];
-      bar1.start(urls.length, 0);
-      const currentRequests: string[] = [];
-
-      for (const [idx, url] of urls.entries()) {
-        const parsed = new URL(url);
-        const index = parsed.pathname.lastIndexOf("/");
-        const pathstr = index === 0 ? "" : parsed.pathname.substring(0, index + 1);
-        const downloadPath = path.join(this.downloadDirPath, pathstr);
-        fs.ensureDirSync(downloadPath);
-        const destPath = path.join(downloadPath, path.basename(parsed.pathname));
-        input.push(
-          limit(() => {
-            return new Promise(async (resolve, reject) => {
-              this.downloadedList.push(url);
-              try {
-                currentRequests.push(url);
-                await downloadFile(url, destPath, this.printLog);
-                resolve(true);
-                bar1.increment();
-                currentRequests.splice(currentRequests.indexOf(url), 1);
-              } catch (error) {
-                reject(error);
-                bar1.increment();
-                currentRequests.splice(currentRequests.indexOf(url), 1);
-              }
-            });
-          })
-        );
-      }
-      const result = await Promise.allSettled(input);
-
-      result.forEach((i) => {
-        if (i.status === "fulfilled") {
-          this.downloadResult.success += 1;
-        } else {
-          /** 失败时删除文件 */
-          // @ts-ignore
-          if (i.reason.outputPath) {
-            // @ts-ignore
-            // fs.unlink(i.reason.outputPath, (err) => {
-            //   if (err) {
-            //     console.log(err);
-            //   }
-            // });
-          }
-          this.downloadResult.fail += 1;
-        }
-      });
-      bar1.stop();
-      return Promise.resolve();
-    } catch (error) {
-      console.log(error);
-      return Promise.reject();
-    }
-  };
-
   replaceContent = (content: string, filePath: string) => {
     let newContent = "";
     const ALL_SCRIPT_REGEX = /(<script[\s\S]*?>)[\s\S]*?<\/script>/gi;
@@ -322,6 +260,68 @@ class Generator {
     return newContent;
   };
 
+  fetchStaticResources = async (urls: string[]) => {
+    console.log(chalk.cyan(`开始下载文件到${this.downloadDirPath}`));
+
+    try {
+      const limit = pLimit(10);
+      const input: Promise<any>[] = [];
+      progressBar.start(urls.length, 0);
+      const currentRequests: string[] = [];
+
+      for (const [idx, url] of urls.entries()) {
+        const parsed = new URL(url);
+        const index = parsed.pathname.lastIndexOf("/");
+        const pathstr = index === 0 ? "" : parsed.pathname.substring(0, index + 1);
+        const downloadPath = path.join(this.downloadDirPath, pathstr);
+        fs.ensureDirSync(downloadPath);
+        const destPath = path.join(downloadPath, path.basename(parsed.pathname));
+        input.push(
+          limit(() => {
+            return new Promise(async (resolve, reject) => {
+              this.downloadedList.push(url);
+              try {
+                currentRequests.push(url);
+                await downloadFile(url, destPath, this.printLog);
+                resolve(true);
+                progressBar.increment();
+                currentRequests.splice(currentRequests.indexOf(url), 1);
+              } catch (error) {
+                reject(error);
+                progressBar.increment();
+                currentRequests.splice(currentRequests.indexOf(url), 1);
+              }
+            });
+          })
+        );
+      }
+      const result = await Promise.allSettled(input);
+
+      result.forEach((i) => {
+        if (i.status === "fulfilled") {
+          this.downloadResult.success += 1;
+        } else {
+          /** 失败时删除文件 */
+          // @ts-ignore
+          if (i.reason.outputPath) {
+            // @ts-ignore
+            // fs.unlink(i.reason.outputPath, (err) => {
+            //   if (err) {
+            //     console.log(err);
+            //   }
+            // });
+          }
+          this.downloadResult.fail += 1;
+        }
+      });
+      progressBar.stop();
+      return Promise.resolve();
+    } catch (error) {
+      console.log(error);
+      return Promise.reject();
+    }
+  };
+
   addDownloadUrls = (url: string) => {
     const item = this.removeQuotes(url);
     if (!this.downloadUrls.includes(item)) {
@@ -368,7 +368,6 @@ class Generator {
   /** 检查http替换遗漏链接,主要为js中动态加载js链接 */
   checkHttpMissingLinks = async () => {
     console.log(chalk.cyan("检查链接是否下载完毕..."));
-
     /** 启动http服务提供给puppeteer打开； pupperter 通过 file:// 打开时无法访问localstorge导致工程没启动 */
     const server = startServer(this.sourceDir, this.server.port);
     const browser = await puppeteer.launch({
