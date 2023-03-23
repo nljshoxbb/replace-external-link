@@ -4,10 +4,8 @@ import * as os from "os";
 import { globSync } from "glob";
 import { downloadFile, formatBytes, getFolderSizeByGlob, readFile, writeFile } from "./utils";
 import * as chalk from "chalk";
-import { CONFIG_FILE_NAME } from "./constant";
-import type { AxiosInstance } from "axios";
+import { CONFIG_FILE_NAME, MAP_FILE_NAME } from "./constant";
 import * as puppeteer from "puppeteer";
-import * as child_process from "child_process";
 import * as cliProgress from "cli-progress";
 import startServer from "./server";
 
@@ -23,16 +21,16 @@ type TDownloadResult = {
   fail: number;
 };
 
-const mkdir = (dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-};
-
 type TServer = {
   host: string;
   port: number;
 };
+
+type TFileInfo = {
+  origin: string;
+  replace: string;
+};
+
 class Generator {
   hostname: string;
   port: string;
@@ -61,10 +59,16 @@ class Generator {
   printLog: boolean;
   /** puppeteer访问服务 */
   server: TServer;
-  constructor(printLog) {
+  /** 是否生成映射文件 */
+  mappingFile: boolean;
+  dev: boolean;
+  detail: Record<string, TFileInfo[]>;
+  constructor(printLog, dev) {
     console.time("time");
     this.printLog = printLog;
+    this.dev = dev;
     this.getConfigFile();
+
     this.replacedDirPath = path.resolve(this.replacedDir);
     this.downloadDirPath = path.join(process.cwd(), this.downloadDir);
     this.downloadUrls = [];
@@ -79,7 +83,8 @@ class Generator {
       host: "127.0.0.1",
       port: 8120,
     };
-
+    this.linkType = "absolute";
+    this.detail = {};
     this.init();
   }
 
@@ -91,6 +96,7 @@ class Generator {
     this.sourceDir = params.sourceDir;
     this.replacedDir = params.replacedDir;
     this.linkType = params.linkType;
+    this.mappingFile = params.mappingFile;
   };
 
   getConfigFile = async () => {
@@ -110,6 +116,7 @@ class Generator {
     }
     await this.getData(this.sourceDir);
     await this.checkHttpMissingLinks();
+    this.mappingFile && this.generateMap();
     this.displayStatistics();
   }
 
@@ -201,14 +208,10 @@ class Generator {
                 resolve(true);
                 bar1.increment();
                 currentRequests.splice(currentRequests.indexOf(url), 1);
-
-                // console.log("current request", currentRequests);
               } catch (error) {
                 reject(error);
                 bar1.increment();
                 currentRequests.splice(currentRequests.indexOf(url), 1);
-
-                // console.log("current request", currentRequests);
               }
             });
           })
@@ -223,7 +226,7 @@ class Generator {
           /** 失败时删除文件 */
           // @ts-ignore
           if (i.reason.outputPath) {
-            // // @ts-ignore
+            // @ts-ignore
             // fs.unlink(i.reason.outputPath, (err) => {
             //   if (err) {
             //     console.log(err);
@@ -295,19 +298,21 @@ class Generator {
 
       newContent = newContent.replace(HTTP_REGEX_EXT, (match) => {
         this.addDownloadUrls(match);
-        return this.replaceOrigin(this.removeQuotes(match), true);
+        const replaceUrl = this.replaceOrigin(this.removeQuotes(match), filePath, true);
+        return replaceUrl;
       });
     } else if (fileType === ".css") {
       newContent = content.replace(HTTP_REGEX_CSS_URL, (match) => {
         const str = match.match(/\(([^)]+)\)/);
         const url = str[1].includes("http") ? str[1] : `http:${str[1]}`;
         this.addDownloadUrls(url);
-        return `(${this.replaceOrigin(url)})`;
+        const replaceUrl = this.replaceOrigin(url, filePath);
+        return `(${replaceUrl})`;
       });
     } else {
       newContent = content.replace(HTTP_REGEX_EXT, (match) => {
         this.addDownloadUrls(match);
-        return this.replaceOrigin(this.removeQuotes(match), true);
+        return this.replaceOrigin(this.removeQuotes(match), filePath, true);
       });
     }
     return newContent;
@@ -330,22 +335,30 @@ class Generator {
   };
 
   /** 替换源 */
-  replaceOrigin = (oldUrl: string, dynamic: boolean = false) => {
-    const url = new URL(oldUrl);
+  replaceOrigin = (originUrl: string, filePath, dynamic: boolean = false) => {
+    const url = new URL(originUrl);
     const downloadDirName = path.basename(path.resolve(this.downloadDir));
+    let replaceUrl = "";
     if (this.linkType === "absolute") {
       url.hostname = this.hostname;
       url.port = this.port;
       url.pathname = `/${downloadDirName}${url.pathname}`;
       url.protocol = this.protocol;
       if (dynamic) {
-        return `"${url.href}"`;
+        replaceUrl = `"${url.href}"`;
+      } else {
+        replaceUrl = url.href;
       }
-      return url.href;
     } else if (this.linkType === "relative") {
-      const href = `./${downloadDirName}${url.pathname}`;
-      return href;
+      replaceUrl = `./${downloadDirName}${url.pathname}`;
     }
+    const relativePath = filePath.split(process.cwd())[1];
+    if (this.detail[relativePath]) {
+      this.detail[relativePath].push({ origin: originUrl, replace: this.removeQuotes(replaceUrl) });
+    } else {
+      this.detail[relativePath] = [{ origin: originUrl, replace: this.removeQuotes(replaceUrl) }];
+    }
+    return replaceUrl;
   };
 
   /** 检查http替换遗漏链接,主要为js中动态加载js链接 */
@@ -355,7 +368,7 @@ class Generator {
     /** 启动http服务提供给puppeteer打开； pupperter 通过 file:// 打开时无法访问localstorge导致工程没启动 */
     const server = startServer(this.sourceDir, this.server.port);
     const browser = await puppeteer.launch({
-      headless: true,
+      headless: !this.dev,
       devtools: true,
     });
     const page = await browser.newPage();
@@ -383,6 +396,12 @@ class Generator {
     if (this.dynamicallyLoadUrls.length > 0) {
       await this.fetchStaticResources(this.dynamicallyLoadUrls);
     }
+  };
+
+  generateMap = () => {
+    const mapPath = path.resolve(MAP_FILE_NAME);
+    fs.writeFileSync(path.resolve(MAP_FILE_NAME), JSON.stringify(this.detail, null, 2), "utf-8");
+    console.log(chalk.cyan(`生成映射文件成功 ${mapPath}`));
   };
 
   displayStatistics = () => {

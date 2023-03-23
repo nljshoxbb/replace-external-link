@@ -11,4 +11,6 @@ module.exports = {
   sourceDir: "./build",
   /** 源替换后输出的文件夹 */
   replacedDir: "./replace_build",
+  /** 生成映射文件 */
+  mappingFile: true,
 };

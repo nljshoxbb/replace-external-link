@@ -22,6 +22,7 @@ const mapActions = {
 const main = async () => {
   const program = new Command();
   program.option("--verbose", "打印详细信息");
+  program.option("--dev", "打印详细信息");
 
   Reflect.ownKeys(mapActions).forEach((action: any) => {
     program
@@ -36,8 +37,8 @@ const main = async () => {
           console.log(chalk.green(`已生成配置文件 ${configPath}`));
         }
         if (action === "replace") {
-          const { verbose } = program.opts();
-          new generator(verbose);
+          const { verbose, dev } = program.opts();
+          new generator(verbose, dev);
         }
       });
   });

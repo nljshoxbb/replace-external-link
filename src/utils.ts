@@ -1,9 +1,7 @@
 import * as chalk from "chalk";
 import axios from "axios";
 import * as fs from "fs-extra";
-import * as https from "https";
 import * as glob from "glob";
-import * as path from "path";
 
 export const readFile = (file): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -39,37 +37,15 @@ export async function downloadFile(fileUrl: string, outputPath: string, printLog
       const repsonse = await axios({ method: "get", url: fileUrl, responseType: "stream", timeout: 3000 });
       repsonse.data.pipe(fileStream);
       fileStream.on("finish", () => {
-        // console.log("fileStream finish");
         printLog && logTask(fileUrl, outputPath, "success");
         fileStream.close();
         resolve(true);
       });
-      // fileStream.on("close", () => {
-      //   console.log("fileStream close", outputPath);
-      // });
       fileStream.on("drain", () => {
         printLog && console.log("\nfileStream drain", outputPath);
       });
-      fileStream.on("data", () => {
-        console.log("fileStream data", outputPath);
-      });
-      fileStream.on("open", () => {
-        console.log("fileStream open", outputPath);
-      });
-      fileStream.on("pipe", () => {
-        console.log("fileStream pipe", outputPath);
-      });
-      fileStream.on("ready", () => {
-        console.log("fileStream ready", outputPath);
-      });
-      // fileStream.on("unpipe", () => {
-      //   console.log("fileStream unpipe", outputPath);
-      // });
       fileStream.on("error", () => {
         console.log("fileStream error", outputPath);
-      });
-      fileStream.on("puase", () => {
-        console.log("fileStream puase", outputPath);
       });
     } catch (error) {
       printLog && logTask(fileUrl, outputPath, "fail");
