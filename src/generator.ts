@@ -110,15 +110,19 @@ class Generator {
   };
 
   async init() {
-    fs.removeSync(this.downloadDirPath);
-    if (this.sourceDir !== this.replacedDir) {
-      fs.removeSync(this.replacedDirPath);
-    }
+    this.removeDir();
     await this.getData(this.sourceDir);
     await this.checkHttpMissingLinks();
     this.mappingFile && this.generateMap();
     this.displayStatistics();
   }
+
+  removeDir = () => {
+    fs.removeSync(this.downloadDirPath);
+    if (this.sourceDir !== this.replacedDir) {
+      fs.removeSync(this.replacedDirPath);
+    }
+  };
 
   async getData(dir) {
     try {
