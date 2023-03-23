@@ -11,11 +11,11 @@ import * as chalk from "chalk";
 const mapActions = {
   init: {
     description: "初始化配置文件",
-    examples: ["replace-external-link init"],
+    examples: ["replace-origin-link init"],
   },
   replace: {
     description: "生成替换文件",
-    examples: ["replace-external-link replace"],
+    examples: ["replace-origin-link replace"],
   },
 };
 

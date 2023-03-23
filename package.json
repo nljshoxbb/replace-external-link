@@ -1,5 +1,5 @@
 {
-  "name": "replace-external-link",
+  "name": "replace-origin-link",
   "version": "1.1.4",
   "description": "",
   "repository": {
@@ -9,7 +9,7 @@
   "author": "eternalsky",
   "main": "lib/index.js",
   "bin": {
-    "replace-external-link": "lib/index.js"
+    "replace-origin-link": "lib/index.js"
   },
   "scripts": {
     "beta": "npm publish --tag beta",
