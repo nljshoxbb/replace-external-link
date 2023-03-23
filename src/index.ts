@@ -21,23 +21,23 @@ const mapActions = {
 
 const main = async () => {
   const program = new Command();
+  program.option("--verbose", "打印详细信息");
 
   Reflect.ownKeys(mapActions).forEach((action: any) => {
     program
-      .option("--log", "打印详细信息")
       .command(action)
       .description(mapActions[action].description)
       .action(async () => {
         if (action === "init") {
-          console.log(program.getOptionValue("log"));
+          console.log(program.getOptionValue("verbose"));
           const result = await readFile(path.join(__dirname, "config.js"));
           const configPath = path.join(process.cwd(), CONFIG_FILE_NAME);
           await writeFile(path.join(process.cwd(), CONFIG_FILE_NAME), result);
           console.log(chalk.green(`已生成配置文件 ${configPath}`));
         }
         if (action === "replace") {
-          const { log } = program.opts();
-          new generator(log);
+          const { verbose } = program.opts();
+          new generator(verbose);
         }
       });
   });

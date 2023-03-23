@@ -47,7 +47,7 @@ module.exports = {
   /** 源替换后端口 */
   port: "8087",
   /** 源文件已下载存放位置 */
-  downloadDir: "../download/replace_build",
+  downloadDir: "./replace_build/download",
   /** 需要替换源链接的文件夹 */
   sourceDir: "./build",
   /** 源替换后输出的文件夹 */
@@ -64,5 +64,5 @@ replace-origin-link replace
 ### 打印详细信息
 
 ```
-replace-origin-link replace --log
+replace-origin-link replace --verbose
 ```
