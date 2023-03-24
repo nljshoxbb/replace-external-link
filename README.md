@@ -1,6 +1,8 @@
 # replace-origin-link
 
-静态文件资源替换和下载工具
+资源替换工具
+
+> 提供资源链接路径替换和下载文件
 
 配置路径
 
@@ -52,6 +54,8 @@ module.exports = {
   sourceDir: "./build",
   /** 源替换后输出的文件夹 */
   replacedDir: "./replace_build",
+  /** 生成映射文件 */
+  mappingFile: true,
 };
 ```
 

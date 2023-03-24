@@ -25,8 +25,9 @@ type TServer = {
 };
 
 type TFileInfo = {
-  origin: string;
   replace: string;
+  filePath: string;
+  status?: "success" | "fail";
 };
 
 class Generator {
@@ -68,6 +69,7 @@ class Generator {
     this.getConfigFile();
 
     this.replacedDirPath = path.resolve(this.replacedDir);
+
     this.downloadDirPath = path.join(process.cwd(), this.downloadDir);
     this.downloadUrls = [];
     this.dynamicallyLoadUrls = [];
@@ -171,6 +173,18 @@ class Generator {
         REPLACE = `\\${replacedDir}`;
       }
       const replacedPath = filePath.replace(REGEX, REPLACE);
+      const replacedDirPath = path.resolve(this.replacedDir);
+      const restPath = replacedPath.split(replacedDir)[1];
+      // console.log({
+      //   replacedPath,
+      //   filePath,
+      //   replacedDirPath,
+      //   replacedDir,
+      //   restPath,
+      //   // r: path.relative(replacedDir),
+      // });
+      // const replacedFilePath = replacedDirPath + restPath;
+
       const extname = path.extname(replacedPath);
       this.replacedFileList.push(filePath);
       if (!extname) {
@@ -192,7 +206,8 @@ class Generator {
     /**
      *  'url:"http://123.com"'
      */
-    const HTTP_REGEX_EXT = /"(https?:\/\/[^\s"]+?\.(?:css|js|png|json))"|'(https?:\/\/[^\s']+\.(?:css|js|png|json))'/gi;
+    const HTTP_REGEX_EXT =
+      /"(https?:\/\/[^\s"]+?\.(?:css|js|png|json|svg))"|'(https?:\/\/[^\s']+\.(?:css|js|png|json|svg))'/gi;
     /**
      * url(// ... .woff2?t=1638951976966)
      * url(http:// ....)
@@ -282,7 +297,15 @@ class Generator {
                 await downloadFile(url, destPath, this.printLog);
                 resolve(true);
                 currentRequests.splice(currentRequests.indexOf(url), 1);
+                this.detail[url] = this.detail[url].map((i) => {
+                  i.status = "success";
+                  return i;
+                });
               } catch (error) {
+                this.detail[url] = this.detail[url].map((i) => {
+                  i.status = "fail";
+                  return i;
+                });
                 reject(error);
                 currentRequests.splice(currentRequests.indexOf(url), 1);
               }
@@ -348,13 +371,16 @@ class Generator {
         replaceUrl = url.href;
       }
     } else if (this.linkType === "relative") {
-      // replaceUrl = `./${downloadDirName}${url.pathname}`;
+      replaceUrl = `./${downloadDirName}${url.pathname}`;
     }
     const relativePath = filePath.split(process.cwd())[1];
-    if (this.detail[relativePath]) {
-      this.detail[relativePath].push({ origin: originUrl, replace: this.removeQuotes(replaceUrl) });
+    if (this.detail[originUrl]) {
+      this.detail[originUrl].push({
+        filePath: relativePath,
+        replace: this.removeQuotes(replaceUrl),
+      });
     } else {
-      this.detail[relativePath] = [{ origin: originUrl, replace: this.removeQuotes(replaceUrl) }];
+      this.detail[originUrl] = [{ filePath: relativePath, replace: this.removeQuotes(replaceUrl) }];
     }
     return replaceUrl;
   };

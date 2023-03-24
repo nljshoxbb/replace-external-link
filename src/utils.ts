@@ -3,7 +3,6 @@ import axios from "axios";
 import * as fs from "fs-extra";
 import * as glob from "glob";
 import * as cliProgress from "cli-progress";
-const readline = require("readline");
 
 export const readFile = (file): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -32,7 +31,7 @@ export const multibar = new cliProgress.MultiBar(
   {
     clearOnComplete: false,
     hideCursor: true,
-    format: " {bar} | {url} | {value}/{total}",
+    format: " {bar} | download {url} | {value}/{total}",
   },
   cliProgress.Presets.shades_classic
 );
@@ -60,13 +59,7 @@ export async function downloadFile(fileUrl: string, outputPath: string, printLog
         timeout: 3000,
         onDownloadProgress: (progressEvent) => {
           if (progressEvent.progress && progressEvent.progress > 0) {
-            // console.log(chalk.cyan(`download: ${(progressEvent.progress * 100).toFixed(2)}%\r`));
             bar.update(progressEvent.progress * 100, { url: fileUrl });
-            // multibar.update(progressEvent.progress * 100, 0);
-            //删除光标所在行
-            // readline.clearLine(process.stdout, 0);
-            //移动光标到行首
-            // readline.cursorTo(process.stdout, 0, 0);
           }
         },
       });
