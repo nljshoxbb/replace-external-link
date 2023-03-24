@@ -354,7 +354,7 @@ class Generator {
         replaceUrl = url.href;
       }
     } else if (this.linkType === "relative") {
-      replaceUrl = `./${downloadDirName}${url.pathname}`;
+      // replaceUrl = `./${downloadDirName}${url.pathname}`;
     }
     const relativePath = filePath.split(process.cwd())[1];
     if (this.detail[relativePath]) {
