@@ -2,7 +2,7 @@ import * as fs from "fs-extra";
 import * as path from "path";
 import * as os from "os";
 import { globSync } from "glob";
-import { downloadFile, formatBytes, getFolderSizeByGlob, readFile, writeFile } from "./utils";
+import { downloadFile, formatBytes, getFolderSizeByGlob, multibar, readFile, writeFile } from "./utils";
 import * as chalk from "chalk";
 import { CONFIG_FILE_NAME, MAP_FILE_NAME } from "./constant";
 import * as puppeteer from "puppeteer";
@@ -11,8 +11,6 @@ import startServer from "./server";
 
 const config = require("./config");
 const pLimit = require("p-limit");
-
-const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.legacy);
 
 type TLinkType = "relative" | "absolute";
 
@@ -266,7 +264,6 @@ class Generator {
     try {
       const limit = pLimit(10);
       const input: Promise<any>[] = [];
-      progressBar.start(urls.length, 0);
       const currentRequests: string[] = [];
 
       for (const [idx, url] of urls.entries()) {
@@ -284,11 +281,9 @@ class Generator {
                 currentRequests.push(url);
                 await downloadFile(url, destPath, this.printLog);
                 resolve(true);
-                progressBar.increment();
                 currentRequests.splice(currentRequests.indexOf(url), 1);
               } catch (error) {
                 reject(error);
-                progressBar.increment();
                 currentRequests.splice(currentRequests.indexOf(url), 1);
               }
             });
@@ -296,7 +291,7 @@ class Generator {
         );
       }
       const result = await Promise.allSettled(input);
-
+      multibar.stop();
       result.forEach((i) => {
         if (i.status === "fulfilled") {
           this.downloadResult.success += 1;
@@ -314,7 +309,6 @@ class Generator {
           this.downloadResult.fail += 1;
         }
       });
-      progressBar.stop();
       return Promise.resolve();
     } catch (error) {
       console.log(error);
@@ -367,37 +361,41 @@ class Generator {
 
   /** 检查http替换遗漏链接,主要为js中动态加载js链接 */
   checkHttpMissingLinks = async () => {
-    console.log(chalk.cyan("检查链接是否下载完毕..."));
-    /** 启动http服务提供给puppeteer打开； pupperter 通过 file:// 打开时无法访问localstorge导致工程没启动 */
-    const server = startServer(this.sourceDir, this.server.port);
-    const browser = await puppeteer.launch({
-      headless: !this.dev,
-      devtools: true,
-    });
-    const page = await browser.newPage();
-    await page.setRequestInterception(true); //开启请求拦截
-    page.on("request", (interceptedRequest) => {
-      const url = interceptedRequest.url();
-      if (!this.downloadUrls.includes(url)) {
-        this.printLog && console.log(chalk.cyan(`puppeteer intercepted request ${url}`));
-        const urlIns = new URL(url);
-        if (urlIns.hostname !== this.server.host) {
-          this.dynamicallyLoadUrls.push(url);
+    try {
+      console.log(chalk.cyan("检查链接是否下载完毕..."));
+      /** 启动http服务提供给puppeteer打开； pupperter 通过 file:// 打开时无法访问localstorge导致工程没启动 */
+      const server = startServer(this.sourceDir, this.server.port);
+      const browser = await puppeteer.launch({
+        headless: !this.dev,
+        devtools: true,
+      });
+      const page = await browser.newPage();
+      await page.setRequestInterception(true); //开启请求拦截
+      page.on("request", (interceptedRequest) => {
+        const url = interceptedRequest.url();
+        if (!this.downloadUrls.includes(url)) {
+          this.printLog && console.log(chalk.cyan(`puppeteer intercepted request ${url}`));
+          const urlIns = new URL(url);
+          if (urlIns.hostname !== this.server.host) {
+            this.dynamicallyLoadUrls.push(url);
+          }
         }
-      }
-      if (interceptedRequest.isInterceptResolutionHandled()) return;
-      if (interceptedRequest.url().endsWith(".png") || interceptedRequest.url().endsWith(".jpg"))
-        interceptedRequest.abort();
-      else interceptedRequest.continue();
-    });
-    const href = `http://${this.server.host}:${this.server.port}`;
-    console.log(chalk.cyan(`puppeteer goto ${href}`));
-    await page.goto(href);
-    await browser.close();
-    server.close();
+        if (interceptedRequest.isInterceptResolutionHandled()) return;
+        if (interceptedRequest.url().endsWith(".png") || interceptedRequest.url().endsWith(".jpg"))
+          interceptedRequest.abort();
+        else interceptedRequest.continue();
+      });
+      const href = `http://${this.server.host}:${this.server.port}`;
+      console.log(chalk.cyan(`puppeteer goto ${href}`));
+      await page.goto(href);
+      await browser.close();
+      server.close();
 
-    if (this.dynamicallyLoadUrls.length > 0) {
-      await this.fetchStaticResources(this.dynamicallyLoadUrls);
+      if (this.dynamicallyLoadUrls.length > 0) {
+        await this.fetchStaticResources(this.dynamicallyLoadUrls);
+      }
+    } catch (error) {
+      console.log(error);
     }
   };
 
