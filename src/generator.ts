@@ -62,10 +62,13 @@ class Generator {
   mappingFile: boolean;
   dev: boolean;
   detail: Record<string, TFileInfo[]>;
+  replacedRecord: Record<string, string>;
   constructor(printLog, dev) {
     console.time("time");
     this.printLog = printLog;
     this.dev = dev;
+    this.linkType = "absolute";
+    this.replacedRecord = {};
     this.getConfigFile();
 
     this.replacedDirPath = path.resolve(this.replacedDir);
@@ -83,7 +86,7 @@ class Generator {
       host: "127.0.0.1",
       port: 8120,
     };
-    this.linkType = "absolute";
+
     this.detail = {};
     this.init();
   }
@@ -127,7 +130,7 @@ class Generator {
   async getData(dir) {
     try {
       const newFiles = this.scanDir(dir);
-      await this.replaceFiles(newFiles, dir === this.downloadDir ? false : true);
+      await this.replaceFiles(newFiles);
       const links = this.downloadUrls.filter((x) => !this.downloadedList.includes(x));
 
       if (links.length === 0) {
@@ -154,7 +157,7 @@ class Generator {
     return files;
   };
 
-  replaceFiles = async (files, replace: boolean = true) => {
+  replaceFiles = async (files) => {
     console.log(chalk.cyan(`匹配替换链接路径 `));
     const sourceDir = path.basename(path.resolve(this.sourceDir));
     const replacedDir = path.basename(path.resolve(this.replacedDir));
@@ -190,8 +193,9 @@ class Generator {
       if (!extname) {
         fs.ensureDirSync(replacedPath);
       } else {
-        if (replace) {
+        if (!this.replacedRecord[replacedPath]) {
           await writeFile(replacedPath, replacedContent);
+          this.replacedRecord[replacedPath] = replacedPath;
         }
       }
     }
@@ -360,18 +364,21 @@ class Generator {
     const url = new URL(originUrl);
     const downloadDirName = path.basename(path.resolve(this.downloadDir));
     let replaceUrl = "";
-    if (this.linkType === "absolute") {
+    if (this.linkType === "relative") {
+      replaceUrl = `/${downloadDirName}${url.pathname}`;
+      if (dynamic) {
+        replaceUrl = `'${replaceUrl}'`;
+      }
+    } else {
       url.hostname = this.hostname;
       url.port = this.port;
       url.pathname = `/${downloadDirName}${url.pathname}`;
       url.protocol = this.protocol;
       if (dynamic) {
-        replaceUrl = `"${url.href}"`;
+        replaceUrl = `'${url.href}'`;
       } else {
         replaceUrl = url.href;
       }
-    } else if (this.linkType === "relative") {
-      replaceUrl = `./${downloadDirName}${url.pathname}`;
     }
     const relativePath = filePath.split(process.cwd())[1];
     if (this.detail[originUrl]) {
