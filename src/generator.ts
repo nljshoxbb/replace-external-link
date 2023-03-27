@@ -63,6 +63,10 @@ class Generator {
   dev: boolean;
   detail: Record<string, TFileInfo[]>;
   replacedRecord: Record<string, string>;
+  /** 临时文件 */
+  replaceTempDir: string;
+  /** 临时文件 */
+  downloadTempDir: string;
   constructor(printLog, dev) {
     console.time("time");
     this.printLog = printLog;
@@ -74,6 +78,8 @@ class Generator {
     this.replacedDirPath = path.resolve(this.replacedDir);
 
     this.downloadDirPath = path.join(process.cwd(), this.downloadDir);
+    this.replaceTempDir = "./replaceTemp";
+    this.downloadTempDir = "./downloadTemp";
     this.downloadUrls = [];
     this.dynamicallyLoadUrls = [];
     this.downloadResult = {
@@ -116,6 +122,7 @@ class Generator {
     this.removeDir();
     await this.getData(this.sourceDir);
     await this.checkHttpMissingLinks();
+    this.generateDir();
     this.mappingFile && this.generateMap();
     this.displayStatistics();
   }
@@ -125,6 +132,16 @@ class Generator {
     if (this.sourceDir !== this.replacedDir) {
       fs.removeSync(this.replacedDirPath);
     }
+  };
+
+  generateDir = () => {
+    const tempDirPath = path.resolve(this.replaceTempDir);
+    fs.copySync(tempDirPath, this.replacedDirPath, { overwrite: true });
+    fs.removeSync(tempDirPath);
+    const downloadTempDirPath = path.resolve(this.downloadTempDir);
+    console.log(downloadTempDirPath, this.downloadDirPath);
+    fs.copySync(downloadTempDirPath, this.downloadDirPath, { overwrite: true });
+    fs.removeSync(downloadTempDirPath);
   };
 
   async getData(dir) {
@@ -161,41 +178,35 @@ class Generator {
     console.log(chalk.cyan(`匹配替换链接路径 `));
     const sourceDir = path.basename(path.resolve(this.sourceDir));
     const replacedDir = path.basename(path.resolve(this.replacedDir));
+    const replaceTempDir = path.basename(path.resolve(this.replaceTempDir));
     for (const filePath of [...files]) {
       const content = await readFile(filePath);
       const replacedContent = this.replaceContent(content, filePath);
       let REGEX,
+        TEMP,
         REPLACE = "";
       // 需兼容 win linux 路径问题
       const platform = os.platform();
       if (platform === "darwin") {
         REGEX = new RegExp(`/${sourceDir}`, "g");
         REPLACE = `/${replacedDir}`;
+        TEMP = `/${replaceTempDir}`;
       } else if (platform === "win32") {
         REGEX = new RegExp(`\\\\${sourceDir}`, "g");
         REPLACE = `\\${replacedDir}`;
+        TEMP = `/${replaceTempDir}`;
       }
       const replacedPath = filePath.replace(REGEX, REPLACE);
-      const replacedDirPath = path.resolve(this.replacedDir);
-      const restPath = replacedPath.split(replacedDir)[1];
-      // console.log({
-      //   replacedPath,
-      //   filePath,
-      //   replacedDirPath,
-      //   replacedDir,
-      //   restPath,
-      //   // r: path.relative(replacedDir),
-      // });
-      // const replacedFilePath = replacedDirPath + restPath;
-
+      const replacedTmpPath = filePath.replace(REGEX, TEMP);
       const extname = path.extname(replacedPath);
       this.replacedFileList.push(filePath);
       if (!extname) {
-        fs.ensureDirSync(replacedPath);
+        fs.ensureDirSync(replacedTmpPath);
       } else {
-        if (!this.replacedRecord[replacedPath]) {
-          await writeFile(replacedPath, replacedContent);
-          this.replacedRecord[replacedPath] = replacedPath;
+        /** 先写入缓存文件夹再生成指定目录 */
+        if (!this.replacedRecord[replacedTmpPath]) {
+          await writeFile(replacedTmpPath, replacedContent);
+          this.replacedRecord[replacedTmpPath] = replacedTmpPath;
         }
       }
     }
@@ -289,9 +300,10 @@ class Generator {
         const parsed = new URL(url);
         const index = parsed.pathname.lastIndexOf("/");
         const pathstr = index === 0 ? "" : parsed.pathname.substring(0, index + 1);
-        const downloadPath = path.join(this.downloadDirPath, pathstr);
-        fs.ensureDirSync(downloadPath);
-        const destPath = path.join(downloadPath, path.basename(parsed.pathname));
+        const downloadTempPath = path.join(path.resolve(this.downloadTempDir), pathstr);
+        /** 先写入缓存文件夹再生成指定目录 */
+        fs.ensureDirSync(downloadTempPath);
+        const destPath = path.join(downloadTempPath, path.basename(parsed.pathname));
         input.push(
           limit(() => {
             return new Promise(async (resolve, reject) => {
