@@ -13,4 +13,6 @@ module.exports = {
   replacedDir: "./replace_build",
   /** 生成映射文件 */
   mappingFile: true,
+  /** 替换路径 relative|absolute */
+  linkType: "relative",
 };

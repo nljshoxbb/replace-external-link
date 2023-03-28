@@ -6,7 +6,6 @@ import { downloadFile, formatBytes, getFolderSizeByGlob, multibar, readFile, wri
 import * as chalk from "chalk";
 import { CONFIG_FILE_NAME, MAP_FILE_NAME } from "./constant";
 import * as puppeteer from "puppeteer";
-import * as cliProgress from "cli-progress";
 import startServer from "./server";
 
 const config = require("./config");
@@ -67,19 +66,16 @@ class Generator {
   replaceTempDir: string;
   /** 临时文件 */
   downloadTempDir: string;
+  downloadTempDirPath: string;
+
+  extentions: string[];
   constructor(printLog, dev) {
     console.time("time");
     this.printLog = printLog;
     this.dev = dev;
     this.linkType = "absolute";
     this.replacedRecord = {};
-    this.getConfigFile();
-
-    this.replacedDirPath = path.resolve(this.replacedDir);
-
-    this.downloadDirPath = path.join(process.cwd(), this.downloadDir);
-    this.replaceTempDir = "./replaceTemp";
-    this.downloadTempDir = "./downloadTemp";
+    this.extentions = ["css", "js", "png", "json", "svg", "gif"];
     this.downloadUrls = [];
     this.dynamicallyLoadUrls = [];
     this.downloadResult = {
@@ -92,14 +88,19 @@ class Generator {
       host: "127.0.0.1",
       port: 8120,
     };
-
     this.detail = {};
+    this.replacedDirPath = path.resolve(this.replacedDir);
+    this.downloadDirPath = path.join(process.cwd(), this.downloadDir);
+    this.replaceTempDir = "./replaceTemp";
+    this.downloadTempDir = "./downloadTemp";
+    this.downloadTempDirPath = path.resolve(this.downloadTempDir);
+
     this.init();
   }
 
   setDefaultConfig = (params) => {
-    this.hostname = params.hostname;
-    this.port = params.port;
+    this.server.host = params.hostname;
+    this.server.port = params.port;
     this.protocol = params.protocol;
     this.downloadDir = params.downloadDir;
     this.sourceDir = params.sourceDir;
@@ -119,6 +120,7 @@ class Generator {
   };
 
   async init() {
+    this.getConfigFile();
     this.removeDir();
     await this.getData(this.sourceDir);
     await this.checkHttpMissingLinks();
@@ -139,7 +141,6 @@ class Generator {
     fs.copySync(tempDirPath, this.replacedDirPath, { overwrite: true });
     fs.removeSync(tempDirPath);
     const downloadTempDirPath = path.resolve(this.downloadTempDir);
-    console.log(downloadTempDirPath, this.downloadDirPath);
     fs.copySync(downloadTempDirPath, this.downloadDirPath, { overwrite: true });
     fs.removeSync(downloadTempDirPath);
   };
@@ -149,12 +150,12 @@ class Generator {
       const newFiles = this.scanDir(dir);
       await this.replaceFiles(newFiles);
       const links = this.downloadUrls.filter((x) => !this.downloadedList.includes(x));
-
+      // console.log(links, newFiles);
       if (links.length === 0) {
         return;
       }
       await this.fetchStaticResources(links);
-      await this.getData(this.downloadDir);
+      await this.getData(this.downloadTempDir);
       return Promise.resolve();
     } catch (error) {
       return Promise.reject();
@@ -221,13 +222,21 @@ class Generator {
     /**
      *  'url:"http://123.com"'
      */
-    const HTTP_REGEX_EXT =
-      /"(https?:\/\/[^\s"]+?\.(?:css|js|png|json|svg))"|'(https?:\/\/[^\s']+\.(?:css|js|png|json|svg))'/gi;
+
+    const extentionStr = this.extentions.join("|");
+    const HTTP_REGEX_FILE = new RegExp(
+      `"(https?:\/\/[^\\s"]+?\.(?:${extentionStr}))"|'(https?:\/\/[^\\s']+\\.(?:${extentionStr}))'|"\/\/[^\\s"]+?\\.(?:${extentionStr})"`,
+      "gi"
+    );
+    // /"(https?:\/\/[^\s"]+?\.(?:css...))"|'(https?:\/\/[^\s']+\.(?:css...))'|"\/\/[^\s"]+?\.(?:css...|ico)"/gi;
     /**
+     * css file
+     * url("// ... .woff2?t=1638951976966")
      * url(// ... .woff2?t=1638951976966)
      * url(http:// ....)
      */
-    const HTTP_REGEX_CSS_URL = /url(\(\/\/[^\s"]+?\.?\))|url(\(https?:\/\/[^\s"]+?\.?\))/gi;
+    const HTTP_REGEX_CSS_INNER_URL =
+      /url(\(\/\/[^\s"]+?\.?\))|url(\("\/\/[^\s"]+?\.?"\))|url(\('\/\/[^\s"]+?\.?'\))|url(\(https?:\/\/[^\s"]+?\.?\))/gi;
 
     if (!content || content.length === 0) {
       return newContent;
@@ -237,64 +246,89 @@ class Generator {
 
     if (fileType === ".html" || fileType === ".ejs") {
       // 处理html资源中的外链
-      newContent = content.replace(ALL_SCRIPT_REGEX, (match, scriptTag) => {
-        if (SCRIPT_TAG_REGEX.test(match) && scriptTag.match(SCRIPT_SRC_REGEX)) {
-          const matchedScriptSrcMatch = scriptTag.match(SCRIPT_SRC_REGEX);
-          let matchedScriptSrc = matchedScriptSrcMatch && matchedScriptSrcMatch[2];
-          if (matchedScriptSrc.includes("http")) {
-            if (matchedScriptSrc.includes("??")) {
-              const [requestPrefix, collectionStr] = matchedScriptSrc.split("??");
-              /** 阿里静态资源聚合请求拆分
-               *  例如 https://g.alicdn.com/platform/c/??react15-polyfill/0.0.1/dist/index.js,lodash/4.6.1/lodash.min.js
-               */
-              let sources = collectionStr.split(",");
-              let newScriptTag = sources.map((k) => {
-                const scriptSrc = `${requestPrefix}${k}`;
+      newContent = content
+        .replace(ALL_SCRIPT_REGEX, (match, scriptTag) => {
+          if (SCRIPT_TAG_REGEX.test(match) && scriptTag.match(SCRIPT_SRC_REGEX)) {
+            const matchedScriptSrcMatch = scriptTag.match(SCRIPT_SRC_REGEX);
+            let matchedScriptSrc = matchedScriptSrcMatch && matchedScriptSrcMatch[2];
+            if (matchedScriptSrc.includes("http")) {
+              if (matchedScriptSrc.includes("??")) {
+                const [requestPrefix, collectionStr] = matchedScriptSrc.split("??");
+                /** 阿里静态资源聚合请求拆分
+                 *  例如 https://g.alicdn.com/platform/c/??react15-polyfill/0.0.1/dist/index.js,lodash/4.6.1/lodash.min.js
+                 */
+                let sources = collectionStr.split(",");
+                let newScriptTag = sources.map((k) => {
+                  const scriptSrc = `${requestPrefix}${k}`;
 
-                if (HTTP_REGEX_EXT.test(scriptSrc)) {
-                  this.addDownloadUrls(scriptSrc);
-                }
-                // 拆为多个script标签进行加载
-                return `\n    <script src="${scriptSrc}"></script>`;
-              });
-              return newScriptTag;
-            } else if (HTTP_REGEX_EXT.test(matchedScriptSrc)) {
-              this.addDownloadUrls(matchedScriptSrc);
+                  if (HTTP_REGEX_FILE.test(scriptSrc)) {
+                    this.addDownloadUrls(scriptSrc);
+                  }
+                  // 拆为多个script标签进行加载
+                  return `\n    <script src="${scriptSrc}"></script>`;
+                });
+                return newScriptTag;
+              } else if (HTTP_REGEX_FILE.test(matchedScriptSrc)) {
+                this.addDownloadUrls(matchedScriptSrc);
+              }
             }
           }
-        }
-        return match;
-      });
-
-      newContent = newContent.replace(HTTP_REGEX_EXT, (match) => {
-        this.addDownloadUrls(match);
-        const replaceUrl = this.replaceOrigin(this.removeQuotes(match), filePath, true);
-        return replaceUrl;
-      });
+          return match;
+        })
+        .replace(HTTP_REGEX_FILE, (match) => {
+          this.addDownloadUrls(match);
+          const replaceUrl = this.replaceOrigin(match, filePath);
+          return replaceUrl;
+        });
     } else if (fileType === ".css") {
-      newContent = content.replace(HTTP_REGEX_CSS_URL, (match) => {
+      newContent = content.replace(HTTP_REGEX_CSS_INNER_URL, (match) => {
+        const singleQuotes = /[']/g.test(match);
+        const doubleQuotes = /["]/g.test(match);
         const str = match.match(/\(([^)]+)\)/);
-        const url = str[1].includes("http") ? str[1] : `http:${str[1]}`;
+        let matchString = str[1];
+
+        if (singleQuotes || doubleQuotes) {
+          matchString = this.removeQuotes(matchString);
+        }
+        let url = matchString.includes("http") ? matchString : `http:${matchString}`;
         this.addDownloadUrls(url);
+        if (doubleQuotes) {
+          url = `"${url}"`;
+        } else if (singleQuotes) {
+          url = `'${url}'`;
+        }
         const replaceUrl = this.replaceOrigin(url, filePath);
-        return `(${replaceUrl})`;
+
+        return `url(${replaceUrl})`;
       });
     } else {
-      newContent = content.replace(HTTP_REGEX_EXT, (match) => {
-        this.addDownloadUrls(match);
-        return this.replaceOrigin(this.removeQuotes(match), filePath, true);
+      newContent = content.replace(HTTP_REGEX_FILE, (match) => {
+        if (match.includes("http")) {
+          this.addDownloadUrls(match);
+          return this.replaceOrigin(match, filePath);
+        } else {
+          // const singleQuotes = /[']/g.test(match);
+          // const doubleQuotes = /["]/g.test(match);
+          // let url = `http:${this.removeQuotes(match)}`;
+          // this.addDownloadUrls(url);
+          // if (doubleQuotes) {
+          //   url = `"${url}"`;
+          // } else if (singleQuotes) {
+          //   url = `'${url}'`;
+          // }
+          // return this.replaceOrigin(url, filePath);
+        }
       });
     }
     return newContent;
   };
 
   fetchStaticResources = async (urls: string[]) => {
-    console.log(chalk.cyan(`开始下载文件到${this.downloadDirPath}`));
+    console.log(chalk.cyan(`开始下载文件到${this.downloadTempDirPath}`));
 
     try {
       const limit = pLimit(10);
       const input: Promise<any>[] = [];
-      const currentRequests: string[] = [];
 
       for (const [idx, url] of urls.entries()) {
         const parsed = new URL(url);
@@ -309,10 +343,9 @@ class Generator {
             return new Promise(async (resolve, reject) => {
               this.downloadedList.push(url);
               try {
-                currentRequests.push(url);
+                console.log(url);
                 await downloadFile(url, destPath, this.printLog);
                 resolve(true);
-                currentRequests.splice(currentRequests.indexOf(url), 1);
                 this.detail[url] = this.detail[url].map((i) => {
                   i.status = "success";
                   return i;
@@ -323,7 +356,6 @@ class Generator {
                   return i;
                 });
                 reject(error);
-                currentRequests.splice(currentRequests.indexOf(url), 1);
               }
             });
           })
@@ -372,35 +404,45 @@ class Generator {
   };
 
   /** 替换源 */
-  replaceOrigin = (originUrl: string, filePath, dynamic: boolean = false) => {
-    const url = new URL(originUrl);
+  replaceOrigin = (originUrl: string, filePath) => {
+    const singleQuotes = /[']/g.test(originUrl);
+    const doubleQuotes = /["]/g.test(originUrl);
+    let url;
+    if (singleQuotes || doubleQuotes) {
+      url = new URL(this.removeQuotes(originUrl));
+    } else {
+      url = new URL(originUrl);
+    }
+
     const downloadDirName = path.basename(path.resolve(this.downloadDir));
+
     let replaceUrl = "";
     if (this.linkType === "relative") {
       replaceUrl = `/${downloadDirName}${url.pathname}`;
-      if (dynamic) {
-        replaceUrl = `'${replaceUrl}'`;
-      }
     } else {
       url.hostname = this.hostname;
       url.port = this.port;
       url.pathname = `/${downloadDirName}${url.pathname}`;
       url.protocol = this.protocol;
-      if (dynamic) {
-        replaceUrl = `'${url.href}'`;
-      } else {
-        replaceUrl = url.href;
-      }
+      replaceUrl = url.href;
     }
+
     const relativePath = filePath.split(process.cwd())[1];
-    if (this.detail[originUrl]) {
-      this.detail[originUrl].push({
+    if (this.detail[url]) {
+      this.detail[url].push({
         filePath: relativePath,
-        replace: this.removeQuotes(replaceUrl),
+        replace: replaceUrl,
       });
     } else {
-      this.detail[originUrl] = [{ filePath: relativePath, replace: this.removeQuotes(replaceUrl) }];
+      this.detail[url] = [{ filePath: relativePath, replace: this.removeQuotes(replaceUrl) }];
     }
+
+    if (singleQuotes) {
+      replaceUrl = `'${replaceUrl}'`;
+    } else if (doubleQuotes) {
+      replaceUrl = `"${replaceUrl}"`;
+    }
+
     return replaceUrl;
   };
 
