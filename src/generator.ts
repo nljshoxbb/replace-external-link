@@ -99,8 +99,8 @@ class Generator {
   }
 
   setDefaultConfig = (params) => {
-    this.server.host = params.hostname;
-    this.server.port = params.port;
+    this.hostname = params.hostname;
+    this.port = params.port;
     this.protocol = params.protocol;
     this.downloadDir = params.downloadDir;
     this.sourceDir = params.sourceDir;
